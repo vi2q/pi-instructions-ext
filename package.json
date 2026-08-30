@@ -1,0 +1,19 @@
+{
+  "name": "pi-instructions-ext",
+  "version": "1.0.0",
+  "description": "pi extension: keeps docs/INSTRUCTIONS.md as the standing record of work instructions and checklists",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vi2q/pi-instructions-ext.git"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
