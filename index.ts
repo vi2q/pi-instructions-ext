@@ -5,6 +5,9 @@
  * - session_start: inject the standing rule once per session (deduped across /reload, /resume, /fork)
  * - before_agent_start: append a short per-turn reminder tag (identical string every turn)
  * - /instr clean: clear the file after confirmation and leave a tombstone note
+ * - /instr-verify: inject a user message asking the model to walk through
+ *   items that need user confirmation (e.g. behavior checks) with the
+ *   ask_user_question tool and reflect the answers in the checklist
  *
  * The extension never parses or rewrites the file except in /instr clean;
  * format is up to the model (GFM checkboxes are suggested in the injected rule).
@@ -24,6 +27,13 @@ const TAG = "Auto-message: Please update docs/INSTRUCTIONS.md as needed.";
 /** Show the per-turn tag in the TUI. Hidden by default; still stored in the session file. */
 const TAG_DISPLAY = false;
 
+const VERIFY_MESSAGE =
+	`Auto-message: Walk through every item in ${INSTRUCTIONS_PATH} that needs user confirmation (sub-items marked "Confirm (user)", unfinished items whose completion condition is a user check such as behavior or visual verification, and any explicitly unfinished work). ` +
+	`For each item, use the ask_user_question tool to ask the user in their language — one question per item, with the required check described concretely (e.g. what to run and what to look for) and options such as OK / problem / later. ` +
+	`If the ask_user_question tool is unavailable, fall back to asking in plain text and waiting for the reply. ` +
+	`Reflect each answer in the file immediately: mark confirmed items "[x]" with a "— user-confirmed (date)" note, record problem reports as "— needs-fix: <summary>", and keep deferred items unchecked with "— pending confirmation". ` +
+	`Do not mark anything confirmed without an explicit user answer. When the repository is git-tracked, suggest committing the file afterwards.`;
+
 // -----------------------------------------------------------------------------
 
 const INIT_CUSTOM_TYPE = "instructions-ext:init";
@@ -33,6 +43,9 @@ const INIT_MESSAGE =
 	`Auto-message: Record the user's work instructions in ${INSTRUCTIONS_PATH} and keep the file up to date as work progresses. ` +
 	`Record each new instruction before starting on it, and maintain and update the existing checklist as items are completed. ` +
 	`Use GFM checkboxes ("- [ ]" / "- [x]") for checklist items. ` +
+	`For items whose completion requires user confirmation (behavior or visual checks, acceptance), add a sub-item prefixed "Confirm (user):" and do not check it off yourself — the user confirms it. ` +
+	`When your work on an instruction finishes, use the ask_user_question tool to ask the user about each such pending confirmation item (describe concretely what to check; options like OK / problem / later), and reflect the answers in the file: "[x]" plus "— user-confirmed (date)" when confirmed, "— needs-fix: <summary>" when a problem is reported, "— pending confirmation" when deferred. ` +
+	`If ask_user_question is unavailable, ask in plain text instead. Never mark a user-confirmation item complete without an explicit user answer. ` +
 	`Pure acknowledgements ("yes", "continue", etc.) need not be recorded. ` +
 	`When the repository is git-tracked, suggest committing ${INSTRUCTIONS_PATH} whenever instructions are added or completed. ` +
 	`Respond and record in the user's language.`;
@@ -91,6 +104,34 @@ export default function (pi: ExtensionAPI) {
 				display: TAG_DISPLAY,
 			},
 		};
+	});
+
+	// /instr-verify — inject a user message that starts the verification
+	// walkthrough. The model asks the user per-item questions via
+	// ask_user_question and reflects the answers in the checklist file.
+	pi.registerCommand("instr-verify", {
+		description: `Verify pending items in ${INSTRUCTIONS_PATH} with the user (asks per-item questions, then updates the file)`,
+		handler: async (_args, ctx) => {
+			const file = join(ctx.cwd, INSTRUCTIONS_PATH);
+			if (!existsSync(file)) {
+				ctx.ui.notify(
+					`${INSTRUCTIONS_PATH} does not exist — nothing to verify. It is created when the first instruction is recorded.`,
+					"warning",
+				);
+				return;
+			}
+
+			if (!ctx.isIdle()) {
+				ctx.ui.notify("Agent is running. Try again after it settles.", "warning");
+				return;
+			}
+
+			await pi.sendUserMessage(VERIFY_MESSAGE);
+			ctx.ui.notify(
+				`Verification request sent — the agent will ask about each item needing user confirmation.`,
+				"info",
+			);
+		},
 	});
 
 	// /instr clean — clear the file and write a tombstone note.
