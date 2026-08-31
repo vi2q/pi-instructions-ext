@@ -10,6 +10,7 @@
  * format is up to the model (GFM checkboxes are suggested in the injected rule).
  */
 
+import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -33,7 +34,30 @@ const INIT_MESSAGE =
 	`Record each new instruction before starting on it, and maintain and update the existing checklist as items are completed. ` +
 	`Use GFM checkboxes ("- [ ]" / "- [x]") for checklist items. ` +
 	`Pure acknowledgements ("yes", "continue", etc.) need not be recorded. ` +
+	`When the repository is git-tracked, suggest committing ${INSTRUCTIONS_PATH} whenever instructions are added or completed. ` +
 	`Respond and record in the user's language.`;
+
+/**
+ * If the instructions file exists but is not yet tracked by git, return a
+ * nudge sentence appended to the standing rule. The record only becomes
+ * durable once it's in history, so untracked files deserve a one-time hint.
+ */
+function gitNudge(cwd: string): string {
+	if (!existsSync(join(cwd, ".git"))) return "";
+	try {
+		const status = execSync(`git status --porcelain -- "${INSTRUCTIONS_PATH}"`, {
+			cwd,
+			stdio: "pipe",
+		})
+			.toString()
+			.trim();
+		if (status === "") return "";
+		return ` ${INSTRUCTIONS_PATH} is not committed to git yet — suggest the user commit it so the record stays in history.`;
+	} catch {
+		// git unavailable or not a repo — skip the nudge
+		return "";
+	}
+}
 
 export default function (pi: ExtensionAPI) {
 	// One-time injection of the standing rule. session_start re-fires on
@@ -48,7 +72,7 @@ export default function (pi: ExtensionAPI) {
 
 		pi.sendMessage({
 			customType: INIT_CUSTOM_TYPE,
-			content: INIT_MESSAGE,
+			content: INIT_MESSAGE + gitNudge(ctx.cwd),
 			display: true,
 		});
 
