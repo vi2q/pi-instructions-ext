@@ -4,8 +4,9 @@
 
 - [ ] Reddit用の紹介ドラフト（英語）を作成する — 対象: instructions-ext
   - 構成: 概要 / アーキテクチャ（session_start, before_agent_start, /instr clean）/ 強み4点 / 細部（重複排除、tombstone、isIdleチェック）
-  - [x] ドラフト作成済み。デスクトップに書き出し完了: ~/Desktop/reddit-post-instructions-ext.md（ユーザーがコピーしやすいようにファイルで提供）
+  - [x] ドラフト作成済み。デスクトップに書き出し完了: ~/Desktop/reddit-post-instructions-ext.md
   - [x] 内容検証済み：ドラフトの全技術細部（重複排除、tombstone、isIdleチェック、gitNudge）と index.ts 実装・README の記述が一致していることを確認
+  - [x] Reddit貼り付け用にプレーンテキスト版に変換してデスクトップの同ファイルを上書き（Markdown記法の`**`や```を除去、区切り線は`──`に変更）— ユーザーからの「Redditはmd記述非対応」との指摘に対応
 
 ## 完了済み
 
