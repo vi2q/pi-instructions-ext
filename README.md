@@ -31,11 +31,11 @@ To scope it to one project, add the package to the project's `.pi/settings.json`
 
 **On session start** (once per session), only a short pointer is injected. If `docs/TASKS.md` or `docs/RULES.md` don't exist yet:
 
-> Auto-message: docs/TASKS.md and docs/RULES.md are not set up yet — call the tasks_init tool to generate them (it only creates what is missing), then read docs/RULES.md and follow it when recording work instructions. Your session owner tag is "(s01a0)".
+> Auto-message: docs/TASKS.md and docs/RULES.md are not set up yet — call the tasks_init tool to generate them (it only creates what is missing), then read docs/RULES.md and follow it when recording work instructions. Your session owner tag is "(s3c9c)".
 
 If both exist:
 
-> Auto-message: Start by reading docs/RULES.md — it defines how work instructions are recorded in docs/TASKS.md. Your session owner tag is "(s01a0)".
+> Auto-message: Start by reading docs/RULES.md — it defines how work instructions are recorded in docs/TASKS.md. Your session owner tag is "(s3c9c)".
 
 **`/tasks-init`** (and the agent-invocable **`tasks_init`** tool) generate the two files if missing: `docs/TASKS.md`, a minimal skeleton, and `docs/RULES.md`, the recording rules — how instructions are recorded, the confirmation flow and its markers, parallel-session owner tags, and housekeeping. Existing files are never overwritten, and `RULES.md` is plain markdown you can edit to adapt the conventions per project; the extension re-injects nothing.
 
@@ -64,7 +64,7 @@ The tag is hidden in the TUI by default. It is stored in the session file either
 
 **`/tasks-completed`** is the same picker over checked items — handy for re-check requests (「これ、もう一度再確認して」).
 
-**Parallel sessions.** The rules in `docs/RULES.md` define owner tags, and the session-start pointer provides the session's own tag (a short id derived from the pi session id, e.g. `(s01a0)`): the model tags every instruction it records with it, updates only items carrying its own tag, and re-reads the file before writing so parallel sessions merge instead of overwriting. On top of that convention, the extension watches the file's content between turns: if it changed on disk since the agent last touched it (another session, or a manual edit), the per-turn reminder switches to a staleness warning telling the model to re-read and merge. The agent's own writes never trigger the warning.
+**Parallel sessions.** The rules in `docs/RULES.md` define owner tags, and the session-start pointer provides the session's own tag (a short id hashed from the full pi session id, so every session gets its own, e.g. `(s3c9c)`): the model tags every instruction it records with it, updates only items carrying its own tag, and re-reads the file before writing so parallel sessions merge instead of overwriting. On top of that convention, the extension watches the file's content between turns: if it changed on disk since the agent last touched it (another session, or a manual edit), the per-turn reminder switches to a staleness warning telling the model to re-read and merge. The agent's own writes never trigger the warning.
 
 **The `tasks_tidy` tool.** The extension registers an agent-invocable tool so the model can tidy the file itself after checklist updates: same deterministic normalization as the command (checkbox syntax, indentation, `Confirm (user):` prefixes), but without a dialog — the call and its result show up in the transcript. **Item order is always preserved** — tidy never reorders, moves, or rewrites item text, so the model can call it without disturbing the document's narrative structure. The tool's own guidelines (appended to the system prompt) tell the model to call it after updating the file.
 

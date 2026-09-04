@@ -363,11 +363,19 @@ function writeTidied(cwd: string, tidied: string): void {
 
 // --- Owner tag ----------------------------------------------------------------
 
+/**
+ * Short session tag shown as "(s<tag>)" in the session-start pointer.
+ * Session ids are UUIDv7 — their leading characters encode the creation
+ * timestamp (the top 16 bits only change every 2^32 ms ≈ 50 days), so a
+ * leading slice would produce the same tag for every session started in
+ * that window. Hash the full id instead so the tag is session-specific.
+ */
 function ownerShort(ctx: {
 	sessionManager: { getSessionId(): string };
 }): string {
 	try {
-		return ctx.sessionManager.getSessionId().slice(0, 4);
+		const id = ctx.sessionManager.getSessionId();
+		return createHash("sha1").update(id).digest("hex").slice(0, 4);
 	} catch {
 		return "sess";
 	}
@@ -893,11 +901,7 @@ export default function (pi: ExtensionAPI) {
 					"utf8",
 				);
 			} else {
-				writeFileSync(
-					archiveFile,
-					`# TASKS archive\n\n${block}`,
-					"utf8",
-				);
+				writeFileSync(archiveFile, `# TASKS archive\n\n${block}`, "utf8");
 			}
 
 			writeFileSync(file, serializeDoc(remaining), "utf8");
@@ -1073,9 +1077,7 @@ export default function (pi: ExtensionAPI) {
 
 			const tombstone =
 				`<!-- Cleared by the user via /tasks-clear on ${timestamp()}.` +
-				(existsSync(join(ctx.cwd, ".git"))
-					? " See git history if tracked."
-					: "") +
+				(existsSync(join(ctx.cwd, ".git")) ? " See git history if tracked." : "") +
 				` -->\n`;
 
 			writeFileSync(file, TASKS_TEMPLATE + "\n" + tombstone, "utf8");
