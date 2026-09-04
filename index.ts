@@ -569,16 +569,20 @@ class TaskPickerComponent implements Component {
 	invalidate(): void {}
 }
 
-/** Open the picker; return the spawned text, or null when cancelled. */
+/** Open the picker; return the spawned text (+captured TUI), or null when cancelled. */
 async function openTaskPicker(
 	ctx: import("@earendil-works/pi-coding-agent").ExtensionCommandContext,
 	categories: PickerCategory[],
 	title: string,
-): Promise<string | null> {
-	return ctx.ui.custom<string | null>(
-		(tui, theme, _keybindings, done) =>
-			new TaskPickerComponent(categories, title, tui, theme, done),
+): Promise<{ picked: string | null; tui?: TUI }> {
+	let captured: TUI | undefined;
+	const picked = await ctx.ui.custom<string | null>(
+		(tui, theme, _keybindings, done) => {
+			captured = tui;
+			return new TaskPickerComponent(categories, title, tui, theme, done);
+		},
 	);
+	return { picked, tui: captured };
 }
 
 function spawnIntoEditor(
@@ -959,8 +963,13 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			const picked = await openTaskPicker(ctx, categories, TASKS_PATH);
-			if (picked !== null) spawnIntoEditor(ctx, picked);
+			const { picked, tui } = await openTaskPicker(ctx, categories, TASKS_PATH);
+			if (picked !== null) {
+				spawnIntoEditor(ctx, picked);
+				// editor.setText() doesn't redraw (interactive mode wires no render
+				// into onChange) — the text would only appear on the next keypress.
+				tui?.requestRender();
+			}
 		},
 	});
 
@@ -995,8 +1004,11 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			const picked = await openTaskPicker(ctx, categories, TASKS_PATH);
-			if (picked !== null) spawnIntoEditor(ctx, picked);
+			const { picked, tui } = await openTaskPicker(ctx, categories, TASKS_PATH);
+			if (picked !== null) {
+				spawnIntoEditor(ctx, picked);
+				tui?.requestRender();
+			}
 		},
 	});
 
