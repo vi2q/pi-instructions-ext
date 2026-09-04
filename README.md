@@ -54,11 +54,17 @@ The tag is hidden in the TUI by default. It is stored in the session file either
 
 **`/instr-verify`** starts a verification walkthrough: a user message is injected asking the model to go through every item that needs user confirmation — one `ask_user_question` per item — and update the checklist from the answers. Use it when the model finished work without asking, or to re-verify deferred items. Nothing is marked confirmed without an explicit user answer.
 
-**`/instr clean`** clears the file after a confirmation dialog and writes a tombstone comment stating when and how it was cleared, so a later session doesn't mistake the empty file for lost work. If the repo is git-tracked, the tombstone points at history.
+**Parallel sessions.** The standing rule includes the session's owner tag (a short id derived from the pi session id, e.g. `(s01a0)`): the model tags every instruction it records with it, updates only items carrying its own tag, and re-reads the file before writing so parallel sessions merge instead of overwriting. On top of that convention, the extension watches the file's content between turns: if it changed on disk since the agent last touched it (another session, or a manual edit), the per-turn reminder switches to a staleness warning telling the model to re-read and merge. The agent's own writes never trigger the warning.
+
+**`/instr-tidy`** deterministically normalizes the file: checkbox syntax (`* [X]`, `-[x]` → `- [x]`), indentation (2 spaces per nesting level), and `Confirm (user):` prefixes on sub-items, then moves unchecked items to the top of each section (checked items keep their order at the bottom). Lines the parser doesn't recognize pass through untouched; if no checklist items are found, nothing is written. A confirmation dialog shows the item count before anything changes.
+
+**`/instr-archive`** moves completed top-level items (with their sub-items) from the active file to `docs/INSTRUCTIONS-archive.md` under a dated `## Archived …` heading, keeping the archive in a single searchable file. A section heading is dropped only when its section becomes completely empty. A confirmation dialog shows the item count first.
+
+**`/instr clean`** clears the file after a confirmation dialog and writes a tombstone comment stating when and how it was cleared, so a later session doesn't mistake the empty file for lost work. If the repo is git-tracked, the tombstone points at history. `/instr` without a subcommand lists all of them.
 
 ## What it deliberately doesn't do
 
-- The extension never parses or rewrites `docs/INSTRUCTIONS.md`. The file's format beyond the checkbox suggestion is up to the model, and you can edit the file freely at any time. Both the confirmation questions and the checklist updates are done by the model; the extension only injects the rules and the `/instr-verify` trigger.
+- The extension never rewrites `docs/INSTRUCTIONS.md` automatically. The file's format beyond the checkbox suggestion is up to the model, and you can edit the file freely at any time. The confirmation questions and checklist updates are done by the model; deterministic rewrites happen only inside the explicit commands (`/instr-tidy`, `/instr-archive`, `/instr clean`) and only after a confirmation dialog.
 - No hard requirement on `@juicesharp/rpiv-ask-user-question`: if the tool is missing, questions fall back to plain text.
 - No file is created until the model first records an instruction. Quiet sessions leave the repo untouched.
 - There is no hard enforcement; the standing rule plus the per-turn tag keep the file current, and you remain the final gate.
