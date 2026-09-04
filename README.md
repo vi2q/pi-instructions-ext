@@ -56,7 +56,13 @@ If the `ask_user_question` tool is not installed, the flow degrades gracefully t
 
 The tag is hidden in the TUI by default. It is stored in the session file either way, so transcripts stay complete.
 
+**After compaction**, a short pointer is re-injected: summaries may not preserve item-level checklist state, so the model is told to re-read `docs/TASKS.md` before updating the record. The message is stored in the session file but hidden in the TUI.
+
 **`/tasks-verify`** starts a verification walkthrough: a user message is injected asking the model to go through every item that needs user confirmation — one `ask_user_question` per item — and update the checklist from the answers. Use it when the model finished work without asking, or to re-verify deferred items. Nothing is marked confirmed without an explicit user answer.
+
+**`/tasks-blocked`** opens a two-column picker over the unfinished work — categories on the left (`←`/`→`: Unfinished · Pending confirm · needs-fix), the selected category's items on the right (`↑`/`↓`). `Enter` spawns the item's text into the editor (ancestor chain and sub-items included, indented), so you can pin-point it back to the agent — append your own wording like 「これに取り掛かって」 and send. `Esc` closes.
+
+**`/tasks-completed`** is the same picker over checked items — handy for re-check requests (「これ、もう一度再確認して」).
 
 **Parallel sessions.** The rules in `docs/RULES.md` define owner tags, and the session-start pointer provides the session's own tag (a short id derived from the pi session id, e.g. `(s01a0)`): the model tags every instruction it records with it, updates only items carrying its own tag, and re-reads the file before writing so parallel sessions merge instead of overwriting. On top of that convention, the extension watches the file's content between turns: if it changed on disk since the agent last touched it (another session, or a manual edit), the per-turn reminder switches to a staleness warning telling the model to re-read and merge. The agent's own writes never trigger the warning.
 
