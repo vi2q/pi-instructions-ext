@@ -8,8 +8,10 @@
  *   docs/RULES.md (the recording rules, generated once and user-editable)
  * - before_agent_start: append a short per-turn reminder tag (identical
  *   string every turn so provider prompt caches stay valid); switches to a
- *   staleness warning when the file changed on disk since the agent last
- *   touched it (a parallel session or a manual edit)
+ *   staleness warning when docs/TASKS.md changed on disk since the agent
+ *   last touched it (a parallel session or a manual edit), or to a
+ *   rules-changed notice when docs/RULES.md changed (re-read the rules —
+ *   the recording conventions may have changed)
  * - turn_end: refresh the staleness snapshot so the agent's own writes don't
  *   trigger the warning
  * - /tasks-tidy command and tasks_tidy tool: deterministic formatting —
@@ -38,13 +40,7 @@
 
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	statSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import {
@@ -68,6 +64,10 @@ const TAG_STALE =
 	`Auto-message: ${TASKS_PATH} has changed on disk since the agent last touched it — ` +
 	`re-read it before updating (a parallel session or the user may have edited it). ` +
 	`Merge the changes instead of overwriting them.`;
+
+const RULES_STALE =
+	`Auto-message: ${RULES_PATH} has changed on disk since the agent last touched it — ` +
+	`re-read it before continuing; the recording conventions may have changed.`;
 
 /** Show the per-turn tag in the TUI. Hidden by default; still stored in the session file. */
 const TAG_DISPLAY = false;
@@ -178,21 +178,28 @@ function ensureTaskFiles(cwd: string): {
 // --- Staleness snapshot (parallel-session change detection) -------------------
 
 interface FileSnapshot {
-	mtimeMs: number;
-	hash: string;
+	tasksHash: string | null;
+	rulesHash: string | null;
 }
 
 let lastKnown: FileSnapshot | null = null;
 
-function snapshotFile(cwd: string): FileSnapshot | null {
-	const file = join(cwd, TASKS_PATH);
+/** Content hash of a file, or null when it doesn't exist (or isn't readable). */
+function hashFile(cwd: string, relPath: string): string | null {
 	try {
-		const st = statSync(file);
-		const hash = createHash("sha1").update(readFileSync(file)).digest("hex");
-		return { mtimeMs: st.mtimeMs, hash };
+		return createHash("sha1")
+			.update(readFileSync(join(cwd, relPath)))
+			.digest("hex");
 	} catch {
 		return null;
 	}
+}
+
+function snapshotFile(cwd: string): FileSnapshot {
+	return {
+		tasksHash: hashFile(cwd, TASKS_PATH),
+		rulesHash: hashFile(cwd, RULES_PATH),
+	};
 }
 
 // --- Checklist parsing / formatting -------------------------------------------
@@ -655,25 +662,33 @@ export default function (pi: ExtensionAPI) {
 
 	// Per-turn reminder. Returned as a custom message riding next to the user's
 	// prompt; identical text every turn so provider prompt caches stay valid.
-	// Switches to a staleness warning when the file changed on disk since the
-	// agent last touched it.
+	// Switches to a staleness warning when a file changed on disk since the
+	// agent last touched it: TASKS.md → re-read and merge; RULES.md → re-read
+	// the rules (the recording conventions may have changed). One-shot — the
+	// snapshot is updated immediately, so the notice fires once, on the first
+	// turn after the change. Rules changes take priority: the conventions
+	// govern how the record is kept.
 	pi.on("before_agent_start", async (_event, ctx) => {
 		const current = snapshotFile(ctx.cwd);
-		let stale = false;
-		if (current && lastKnown) {
-			if (current.hash === lastKnown.hash) {
-				lastKnown = current; // touched but identical content
-			} else {
-				stale = true;
-				lastKnown = current;
-			}
-		} else if (current) {
+		let tasksStale = false;
+		let rulesStale = false;
+		if (lastKnown) {
+			// Only flag changes to files that currently exist: a file that never
+			// existed (e.g. RULES.md in an uninitialized project) is not a change,
+			// and a deleted file is not flagged (re-reading it would find nothing)
+			// — but its snapshot slot is refreshed either way.
+			tasksStale =
+				current.tasksHash !== null && current.tasksHash !== lastKnown.tasksHash;
+			rulesStale =
+				current.rulesHash !== null && current.rulesHash !== lastKnown.rulesHash;
+			lastKnown = current;
+		} else {
 			lastKnown = current;
 		}
 		return {
 			message: {
 				customType: TAG_CUSTOM_TYPE,
-				content: stale ? TAG_STALE : TAG,
+				content: rulesStale ? RULES_STALE : tasksStale ? TAG_STALE : TAG,
 				display: TAG_DISPLAY,
 			},
 		};
