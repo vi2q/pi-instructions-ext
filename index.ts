@@ -125,6 +125,10 @@ How this project records work instructions and their state (docs/TASKS.md).
 - If docs/TASKS.md accumulates many completed items, suggest that the user
   run /tasks-archive. The archive command is user-invoked — never move
   completed items yourself.
+- When work finishes and the project has no git repository yet, suggest
+  initializing one so the work and this record stay in history. At natural
+  checkpoints, suggest committing uncommitted changes. The agent proposes —
+  git is run only with the user's go-ahead.
 - The user may feed items back into the conversation via /tasks-blocked
   (unfinished / pending-confirmation / needs-fix items) or /tasks-completed
   (checked items, for re-check requests). When the user quotes one of these
