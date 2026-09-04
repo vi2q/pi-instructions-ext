@@ -1,8 +1,8 @@
 # pi-instructions-ext
 
-A [pi](https://pi.dev) extension that keeps `docs/INSTRUCTIONS.md` as the standing record of your work instructions and their checklist state.
+A [pi](https://pi.dev) extension that keeps `docs/TASKS.md` as the standing record of your work instructions and their checklist state.
 
-Every session, the agent is instructed to record your work instructions in `docs/INSTRUCTIONS.md` — the instruction itself, a checklist of the concrete steps, and their completion status as GFM checkboxes (`- [ ]` / `- [x]`). Items whose completion requires the user (behavior or visual checks, acceptance) are recorded as confirmation sub-items and verified through structured questions instead of being self-checked by the model. The file is ordinary markdown in your repository: you can read it, diff it, commit it, and start a fresh session pointing at it as a handoff document.
+Every session, the agent is instructed to record your work instructions in `docs/TASKS.md` — the instruction itself, a checklist of the concrete steps, and their completion status as GFM checkboxes (`- [ ]` / `- [x]`). Items whose completion requires the user (behavior or visual checks, acceptance) are recorded as confirmation sub-items and verified through structured questions instead of being self-checked by the model. The file is ordinary markdown in your repository: you can read it, diff it, commit it, and start a fresh session pointing at it as a handoff document.
 
 ## Why
 
@@ -31,7 +31,7 @@ To scope it to one project, add the package to the project's `.pi/settings.json`
 
 **On session start** (once per session), a standing rule is injected into context:
 
-> Auto-message: Record the user's work instructions in docs/INSTRUCTIONS.md and keep the file up to date as work progresses. Record each new instruction before starting on it, and maintain and update the existing checklist as items are completed. Use GFM checkboxes ("- [ ]" / "- [x]") for checklist items. For items whose completion requires user confirmation (behavior or visual checks, acceptance), add a sub-item prefixed "Confirm (user):" and do not check it off yourself — the user confirms it. When your work on an instruction finishes, use the ask_user_question tool to ask the user about each such pending confirmation item …
+> Auto-message: Record the user's work instructions in docs/TASKS.md and keep the file up to date as work progresses. Record each new instruction before starting on it, and maintain and update the existing checklist as items are completed. Use GFM checkboxes ("- [ ]" / "- [x]") for checklist items. For items whose completion requires user confirmation (behavior or visual checks, acceptance), add a sub-item prefixed "Confirm (user):" and do not check it off yourself — the user confirms it. When your work on an instruction finishes, use the ask_user_question tool to ask the user about each such pending confirmation item …
 
 Short acknowledgements like "yes" or "go ahead" are left out of the record by design; the model judges what counts as an instruction.
 
@@ -48,7 +48,7 @@ If the `ask_user_question` tool is not installed, the flow degrades gracefully t
 
 **On every turn**, a short reminder rides along with your prompt:
 
-> Auto-message: Please update docs/INSTRUCTIONS.md as needed.
+> Auto-message: Please update docs/TASKS.md as needed.
 
 The tag is hidden in the TUI by default. It is stored in the session file either way, so transcripts stay complete.
 
@@ -58,13 +58,13 @@ The tag is hidden in the TUI by default. It is stored in the session file either
 
 **`/instr-tidy`** deterministically normalizes the file: checkbox syntax (`* [X]`, `-[x]` → `- [x]`), indentation (2 spaces per nesting level), and `Confirm (user):` prefixes on sub-items, then moves unchecked items to the top of each section (checked items keep their order at the bottom). Lines the parser doesn't recognize pass through untouched; if no checklist items are found, nothing is written. A confirmation dialog shows the item count before anything changes.
 
-**`/instr-archive`** moves completed top-level items (with their sub-items) from the active file to `docs/INSTRUCTIONS-archive.md` under a dated `## Archived …` heading, keeping the archive in a single searchable file. A section heading is dropped only when its section becomes completely empty. A confirmation dialog shows the item count first.
+**`/instr-archive`** moves completed top-level items (with their sub-items) from the active file to `docs/TASKS-archive.md` under a dated `## Archived …` heading, keeping the archive in a single searchable file. A section heading is dropped only when its section becomes completely empty. A confirmation dialog shows the item count first.
 
 **`/instr clean`** clears the file after a confirmation dialog and writes a tombstone comment stating when and how it was cleared, so a later session doesn't mistake the empty file for lost work. If the repo is git-tracked, the tombstone points at history. `/instr` without a subcommand lists all of them.
 
 ## What it deliberately doesn't do
 
-- The extension never rewrites `docs/INSTRUCTIONS.md` automatically. The file's format beyond the checkbox suggestion is up to the model, and you can edit the file freely at any time. The confirmation questions and checklist updates are done by the model; deterministic rewrites happen only inside the explicit commands (`/instr-tidy`, `/instr-archive`, `/instr clean`) and only after a confirmation dialog.
+- The extension never rewrites `docs/TASKS.md` automatically. The file's format beyond the checkbox suggestion is up to the model, and you can edit the file freely at any time. The confirmation questions and checklist updates are done by the model; deterministic rewrites happen only inside the explicit commands (`/instr-tidy`, `/instr-archive`, `/instr clean`) and only after a confirmation dialog.
 - No hard requirement on `@juicesharp/rpiv-ask-user-question`: if the tool is missing, questions fall back to plain text.
 - No file is created until the model first records an instruction. Quiet sessions leave the repo untouched.
 - There is no hard enforcement; the standing rule plus the per-turn tag keep the file current, and you remain the final gate.

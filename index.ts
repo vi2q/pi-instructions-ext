@@ -1,5 +1,5 @@
 /**
- * instructions-ext — keep docs/INSTRUCTIONS.md as the standing record of
+ * instructions-ext — keep docs/TASKS.md as the standing record of
  * work instructions and their checklist state.
  *
  * - session_start: inject the standing rule once per session (deduped across
@@ -17,7 +17,7 @@
  *   order at the bottom). Unrecognized lines pass through untouched; if no
  *   checklist items are found the file is left as is.
  * - /instr-archive: move completed top-level items (with their sub-items) to
- *   docs/INSTRUCTIONS-archive.md under a dated heading
+ *   docs/TASKS-archive.md under a dated heading
  * - /instr clean: clear the file after confirmation and leave a tombstone
  *
  * The extension never rewrites the file automatically; deterministic
@@ -32,13 +32,13 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // --- Configuration -----------------------------------------------------------
 
-const INSTRUCTIONS_PATH = "docs/INSTRUCTIONS.md";
-const ARCHIVE_PATH = "docs/INSTRUCTIONS-archive.md";
+const TASKS_PATH = "docs/TASKS.md";
+const ARCHIVE_PATH = "docs/TASKS-archive.md";
 
-const TAG = "Auto-message: Please update docs/INSTRUCTIONS.md as needed.";
+const TAG = "Auto-message: Please update docs/TASKS.md as needed.";
 
 const TAG_STALE =
-	`Auto-message: ${INSTRUCTIONS_PATH} has changed on disk since the agent last touched it — ` +
+	`Auto-message: ${TASKS_PATH} has changed on disk since the agent last touched it — ` +
 	`re-read it before updating (a parallel session or the user may have edited it). ` +
 	`Merge the changes instead of overwriting them.`;
 
@@ -46,7 +46,7 @@ const TAG_STALE =
 const TAG_DISPLAY = false;
 
 const VERIFY_MESSAGE =
-	`Auto-message: Walk through every item in ${INSTRUCTIONS_PATH} that needs user confirmation (sub-items marked "Confirm (user)", unfinished items whose completion condition is a user check such as behavior or visual verification, and any explicitly unfinished work). ` +
+	`Auto-message: Walk through every item in ${TASKS_PATH} that needs user confirmation (sub-items marked "Confirm (user)", unfinished items whose completion condition is a user check such as behavior or visual verification, and any explicitly unfinished work). ` +
 	`For each item, use the ask_user_question tool to ask the user in their language — one question per item, with the required check described concretely (e.g. what to run and what to look for) and options such as OK / problem / later. ` +
 	`If the ask_user_question tool is unavailable, fall back to asking in plain text and waiting for the reply. ` +
 	`Reflect each answer in the file immediately: mark confirmed items "[x]" with a "— user-confirmed (date)" note, record problem reports as "— needs-fix: <summary>", and keep deferred items unchecked with "— pending confirmation". ` +
@@ -59,16 +59,16 @@ const TAG_CUSTOM_TYPE = "instructions-ext:auto-tag";
 
 function buildInitMessage(ownerShort: string): string {
 	return (
-		`Auto-message: Record the user's work instructions in ${INSTRUCTIONS_PATH} and keep the file up to date as work progresses. ` +
+		`Auto-message: Record the user's work instructions in ${TASKS_PATH} and keep the file up to date as work progresses. ` +
 		`Record each new instruction before starting on it, and maintain and update the existing checklist as items are completed. ` +
 		`Use GFM checkboxes ("- [ ]" / "- [x]") for checklist items. ` +
 		`For items whose completion requires user confirmation (behavior or visual checks, acceptance), add a sub-item prefixed "Confirm (user):" and do not check it off yourself — the user confirms it. ` +
 		`When your work on an instruction finishes, use the ask_user_question tool to ask the user about each such pending confirmation item (describe concretely what to check; options like OK / problem / later), and reflect the answers in the file: "[x]" plus "— user-confirmed (date)" when confirmed, "— needs-fix: <summary>" when a problem is reported, "— pending confirmation" when deferred. ` +
 		`If ask_user_question is unavailable, ask in plain text instead. Never mark a user-confirmation item complete without an explicit user answer. ` +
 		`Parallel-session rules: tag each top-level instruction you record with your session owner tag "(s${ownerShort})" and update only items carrying your own tag unless the user explicitly instructs otherwise; ` +
-		`re-read ${INSTRUCTIONS_PATH} before updating it, since parallel sessions may have changed it — merge, don't overwrite. ` +
+		`re-read ${TASKS_PATH} before updating it, since parallel sessions may have changed it — merge, don't overwrite. ` +
 		`Pure acknowledgements ("yes", "continue", etc.) need not be recorded. ` +
-		`When the repository is git-tracked, suggest committing ${INSTRUCTIONS_PATH} whenever instructions are added or completed. ` +
+		`When the repository is git-tracked, suggest committing ${TASKS_PATH} whenever instructions are added or completed. ` +
 		`Respond and record in the user's language.`
 	);
 }
@@ -83,7 +83,7 @@ interface FileSnapshot {
 let lastKnown: FileSnapshot | null = null;
 
 function snapshotFile(cwd: string): FileSnapshot | null {
-	const file = join(cwd, INSTRUCTIONS_PATH);
+	const file = join(cwd, TASKS_PATH);
 	try {
 		const st = statSync(file);
 		const hash = createHash("sha1").update(readFileSync(file)).digest("hex");
@@ -260,14 +260,14 @@ function ownerShort(ctx: { sessionManager: { getSessionId(): string } }): string
 function gitNudge(cwd: string): string {
 	if (!existsSync(join(cwd, ".git"))) return "";
 	try {
-		const status = execSync(`git status --porcelain -- "${INSTRUCTIONS_PATH}"`, {
+		const status = execSync(`git status --porcelain -- "${TASKS_PATH}"`, {
 			cwd,
 			stdio: "pipe",
 		})
 			.toString()
 			.trim();
 		if (status === "") return "";
-		return ` ${INSTRUCTIONS_PATH} is not committed to git yet — suggest the user commit it so the record stays in history.`;
+		return ` ${TASKS_PATH} is not committed to git yet — suggest the user commit it so the record stays in history.`;
 	} catch {
 		// git unavailable or not a repo — skip the nudge
 		return "";
@@ -300,7 +300,7 @@ export default function (pi: ExtensionAPI) {
 		lastKnown = snapshotFile(ctx.cwd);
 
 		if (ctx.hasUI) {
-			ctx.ui.notify(`Instructions mode: ${INSTRUCTIONS_PATH}`, "info");
+			ctx.ui.notify(`Tasks mode: ${TASKS_PATH}`, "info");
 		}
 	});
 
@@ -338,11 +338,11 @@ export default function (pi: ExtensionAPI) {
 
 	// /instr-tidy — deterministic formatting + unchecked items first.
 	pi.registerCommand("instr-tidy", {
-		description: `Tidy ${INSTRUCTIONS_PATH}: normalize format and move unchecked items to the top`,
+		description: `Tidy ${TASKS_PATH}: normalize format and move unchecked items to the top`,
 		handler: async (_args, ctx) => {
-			const file = join(ctx.cwd, INSTRUCTIONS_PATH);
+			const file = join(ctx.cwd, TASKS_PATH);
 			if (!existsSync(file)) {
-				ctx.ui.notify(`${INSTRUCTIONS_PATH} does not exist.`, "warning");
+				ctx.ui.notify(`${TASKS_PATH} does not exist.`, "warning");
 				return;
 			}
 			if (!ctx.isIdle()) {
@@ -355,7 +355,7 @@ export default function (pi: ExtensionAPI) {
 			const items = countItems(sections);
 			if (items === 0) {
 				ctx.ui.notify(
-					`No checklist items found in ${INSTRUCTIONS_PATH} — nothing to tidy.`,
+					`No checklist items found in ${TASKS_PATH} — nothing to tidy.`,
 					"info",
 				);
 				return;
@@ -363,7 +363,7 @@ export default function (pi: ExtensionAPI) {
 
 			const tidied = tidyDoc(sections);
 			if (tidied === original) {
-				ctx.ui.notify(`${INSTRUCTIONS_PATH} is already tidy.`, "info");
+				ctx.ui.notify(`${TASKS_PATH} is already tidy.`, "info");
 				return;
 			}
 
@@ -378,17 +378,17 @@ export default function (pi: ExtensionAPI) {
 
 			writeFileSync(file, tidied, "utf8");
 			lastKnown = snapshotFile(ctx.cwd);
-			ctx.ui.notify(`${INSTRUCTIONS_PATH} tidied.`, "info");
+			ctx.ui.notify(`${TASKS_PATH} tidied.`, "info");
 		},
 	});
 
 	// /instr-archive — move completed items to the archive file.
 	pi.registerCommand("instr-archive", {
-		description: `Move completed items from ${INSTRUCTIONS_PATH} to ${ARCHIVE_PATH}`,
+		description: `Move completed items from ${TASKS_PATH} to ${ARCHIVE_PATH}`,
 		handler: async (_args, ctx) => {
-			const file = join(ctx.cwd, INSTRUCTIONS_PATH);
+			const file = join(ctx.cwd, TASKS_PATH);
 			if (!existsSync(file)) {
-				ctx.ui.notify(`${INSTRUCTIONS_PATH} does not exist.`, "warning");
+				ctx.ui.notify(`${TASKS_PATH} does not exist.`, "warning");
 				return;
 			}
 			if (!ctx.isIdle()) {
@@ -401,7 +401,7 @@ export default function (pi: ExtensionAPI) {
 				extractCompleted(parseDoc(original));
 			if (movedCount === 0) {
 				ctx.ui.notify(
-					`No completed items in ${INSTRUCTIONS_PATH} — nothing to archive.`,
+					`No completed items in ${TASKS_PATH} — nothing to archive.`,
 					"info",
 				);
 				return;
@@ -428,7 +428,7 @@ export default function (pi: ExtensionAPI) {
 			} else {
 				writeFileSync(
 					join(ctx.cwd, ARCHIVE_PATH),
-					`# INSTRUCTIONS archive\n\n${block}`,
+					`# TASKS archive\n\n${block}`,
 					"utf8",
 				);
 			}
@@ -446,12 +446,12 @@ export default function (pi: ExtensionAPI) {
 	// walkthrough. The model asks the user per-item questions via
 	// ask_user_question and reflects the answers in the checklist file.
 	pi.registerCommand("instr-verify", {
-		description: `Verify pending items in ${INSTRUCTIONS_PATH} with the user (asks per-item questions, then updates the file)`,
+		description: `Verify pending items in ${TASKS_PATH} with the user (asks per-item questions, then updates the file)`,
 		handler: async (_args, ctx) => {
-			const file = join(ctx.cwd, INSTRUCTIONS_PATH);
+			const file = join(ctx.cwd, TASKS_PATH);
 			if (!existsSync(file)) {
 				ctx.ui.notify(
-					`${INSTRUCTIONS_PATH} does not exist — nothing to verify. It is created when the first instruction is recorded.`,
+					`${TASKS_PATH} does not exist — nothing to verify. It is created when the first instruction is recorded.`,
 					"warning",
 				);
 				return;
@@ -472,26 +472,26 @@ export default function (pi: ExtensionAPI) {
 
 	// /instr — clean the file, or show usage for all subcommands.
 	pi.registerCommand("instr", {
-		description: `Manage ${INSTRUCTIONS_PATH} (subcommands: tidy, archive, clean)`,
+		description: `Manage ${TASKS_PATH} (subcommands: tidy, archive, clean)`,
 		handler: async (args, ctx) => {
 			const sub = args.trim().toLowerCase();
 			if (sub !== "clean") {
 				ctx.ui.notify(
-					`Usage: /instr tidy — normalize format, unchecked items first · /instr archive — move completed items to ${ARCHIVE_PATH} · /instr clean — clear ${INSTRUCTIONS_PATH} and write a tombstone note.`,
+					`Usage: /instr tidy — normalize format, unchecked items first · /instr archive — move completed items to ${ARCHIVE_PATH} · /instr clean — clear ${TASKS_PATH} and write a tombstone note.`,
 					"info",
 				);
 				return;
 			}
 
-			const file = join(ctx.cwd, INSTRUCTIONS_PATH);
+			const file = join(ctx.cwd, TASKS_PATH);
 			if (!existsSync(file)) {
-				ctx.ui.notify(`${INSTRUCTIONS_PATH} does not exist.`, "warning");
+				ctx.ui.notify(`${TASKS_PATH} does not exist.`, "warning");
 				return;
 			}
 
 			const current = readFileSync(file, "utf8");
 			if (current.trim() === "") {
-				ctx.ui.notify(`${INSTRUCTIONS_PATH} is already empty.`, "info");
+				ctx.ui.notify(`${TASKS_PATH} is already empty.`, "info");
 				return;
 			}
 
@@ -502,7 +502,7 @@ export default function (pi: ExtensionAPI) {
 
 			const ok = await ctx.ui.confirm(
 				"Clear instructions?",
-				`${INSTRUCTIONS_PATH} will be cleared and a tombstone note written. This cannot be undone (see git history if tracked).`,
+				`${TASKS_PATH} will be cleared and a tombstone note written. This cannot be undone (see git history if tracked).`,
 			);
 			if (!ok) {
 				ctx.ui.notify("Cancelled.", "info");
@@ -520,7 +520,7 @@ export default function (pi: ExtensionAPI) {
 
 			writeFileSync(file, tombstone, "utf8");
 			lastKnown = snapshotFile(ctx.cwd);
-			ctx.ui.notify(`${INSTRUCTIONS_PATH} cleared.`, "info");
+			ctx.ui.notify(`${TASKS_PATH} cleared.`, "info");
 		},
 	});
 }
