@@ -66,7 +66,9 @@ The tag is hidden in the TUI by default. It is stored in the session file either
 
 **`/tasks-archive`** moves completed top-level items (with their sub-items) from the active file to `docs/TASKS-archive.md` under a dated `## Archived …` heading, keeping the archive in a single searchable file. A section heading is dropped only when its section becomes completely empty. A confirmation dialog shows the item count first.
 
-**`/tasks-clear`** clears the file after a confirmation dialog and writes a tombstone comment stating when and how it was cleared, so a later session doesn't mistake the empty file for lost work. If the repo is git-tracked, the tombstone points at history. `/tasks-info` lists all of them.
+**`/tasks-clear`** clears the file after a confirmation dialog and writes a tombstone comment stating when and how it was cleared, so a later session doesn't mistake the empty file for lost work. If the repo is git-tracked, the tombstone points at history.
+
+**`/tasks-info`** prints the full list of `/tasks-*` commands with one-line descriptions. It is only a cheat sheet — it takes no action.
 
 ## What it deliberately doesn't do
 
