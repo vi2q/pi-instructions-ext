@@ -11,14 +11,15 @@
  *   touched it (a parallel session or a manual edit)
  * - turn_end: refresh the staleness snapshot so the agent's own writes don't
  *   trigger the warning
- * - /instr-tidy: deterministic formatting — normalize checkbox syntax and
+ * - /tasks-tidy command and tasks_tidy tool: deterministic formatting —
+ *   normalize checkbox syntax and
  *   indentation, normalize "Confirm (user):" prefixes on sub-items, and move
  *   unchecked items to the top of each section (checked items keep their
  *   order at the bottom). Unrecognized lines pass through untouched; if no
  *   checklist items are found the file is left as is.
- * - /instr-archive: move completed top-level items (with their sub-items) to
+ * - /tasks-archive: move completed top-level items (with their sub-items) to
  *   docs/TASKS-archive.md under a dated heading
- * - /instr clean: clear the file after confirmation and leave a tombstone
+ * - /tasks-clear: clear the file after confirmation and leave a tombstone
  *
  * The extension never rewrites the file automatically; deterministic
  * rewrites happen only inside the explicit commands above.
@@ -29,6 +30,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 
 // --- Configuration -----------------------------------------------------------
 
@@ -67,6 +69,7 @@ function buildInitMessage(ownerShort: string): string {
 		`If ask_user_question is unavailable, ask in plain text instead. Never mark a user-confirmation item complete without an explicit user answer. ` +
 		`Parallel-session rules: tag each top-level instruction you record with your session owner tag "(s${ownerShort})" and update only items carrying your own tag unless the user explicitly instructs otherwise; ` +
 		`re-read ${TASKS_PATH} before updating it, since parallel sessions may have changed it — merge, don't overwrite. ` +
+		`The tasks_tidy tool is available: after updating ${TASKS_PATH}, call it to normalize formatting (checkbox syntax, 2-space nesting, "Confirm (user):" prefixes) and keep unchecked items on top. ` +
 		`Pure acknowledgements ("yes", "continue", etc.) need not be recorded. ` +
 		`When the repository is git-tracked, suggest committing ${TASKS_PATH} whenever instructions are added or completed. ` +
 		`Respond and record in the user's language.`
@@ -227,7 +230,11 @@ function extractCompleted(sections: Section[]): {
 	for (const s of sections) {
 		const keep = s.roots.filter((r) => !r.checked);
 		moved.push(...s.roots.filter((r) => r.checked));
-		if (s.heading === null || keep.length > 0 || s.pre.some((l) => l.trim() !== "")) {
+		if (
+			s.heading === null ||
+			keep.length > 0 ||
+			s.pre.some((l) => l.trim() !== "")
+		) {
 			remaining.push({ heading: s.heading, pre: s.pre, roots: keep });
 		}
 	}
@@ -240,9 +247,37 @@ function extractCompleted(sections: Section[]): {
 	};
 }
 
+// --- Tidy core (shared by /tasks-tidy command and the tasks_tidy tool) --------
+
+interface TidyOutcome {
+	status: "missing" | "no-items" | "unchanged" | "changed";
+	items: number;
+	/** The tidied text, when status is "changed". */
+	tidied?: string;
+}
+
+function computeTidy(cwd: string): TidyOutcome {
+	const file = join(cwd, TASKS_PATH);
+	if (!existsSync(file)) return { status: "missing", items: 0 };
+	const original = readFileSync(file, "utf8");
+	const sections = parseDoc(original);
+	const items = countItems(sections);
+	if (items === 0) return { status: "no-items", items };
+	const tidied = tidyDoc(sections);
+	if (tidied === original) return { status: "unchanged", items };
+	return { status: "changed", items, tidied };
+}
+
+function writeTidied(cwd: string, tidied: string): void {
+	writeFileSync(join(cwd, TASKS_PATH), tidied, "utf8");
+	lastKnown = snapshotFile(cwd);
+}
+
 // --- Owner tag ----------------------------------------------------------------
 
-function ownerShort(ctx: { sessionManager: { getSessionId(): string } }): string {
+function ownerShort(ctx: {
+	sessionManager: { getSessionId(): string };
+}): string {
 	try {
 		return ctx.sessionManager.getSessionId().slice(0, 4);
 	} catch {
@@ -336,12 +371,54 @@ export default function (pi: ExtensionAPI) {
 		lastKnown = snapshotFile(ctx.cwd);
 	});
 
-	// /instr-tidy — deterministic formatting + unchecked items first.
-	pi.registerCommand("instr-tidy", {
+	// tasks_tidy — agent-invocable tool: the model can tidy the file itself
+	// after checklist updates (no dialog; the call and result show in the
+	// transcript). Same deterministic rewrite as /tasks-tidy.
+	pi.registerTool({
+		name: "tasks_tidy",
+		label: "Tidy tasks file",
+		description: `Normalize ${TASKS_PATH}: fix checkbox syntax, indentation and "Confirm (user):" prefixes, and reorder items unchecked-first within each section. Non-destructive: unrecognized lines pass through untouched.`,
+		promptSnippet: `Tidy ${TASKS_PATH}: normalize checklist formatting and move unchecked items to the top`,
+		promptGuidelines: [
+			`After updating ${TASKS_PATH}, call tasks_tidy to keep the format normalized (checkbox syntax, 2-space nesting, "Confirm (user):" prefixes, unchecked items first).`,
+		],
+		parameters: Type.Object({}),
+		execute: async (_toolCallId, _params, _signal, _onUpdate, ctx) => {
+			const outcome = computeTidy(ctx.cwd);
+			if (outcome.status === "missing") {
+				return {
+					content: [{ type: "text", text: `${TASKS_PATH} does not exist.` }],
+					details: outcome,
+				};
+			}
+			if (outcome.status === "no-items") {
+				return {
+					content: [{ type: "text", text: `No checklist items in ${TASKS_PATH} — nothing to tidy.` }],
+					details: outcome,
+				};
+			}
+			if (outcome.status === "unchanged") {
+				return {
+					content: [{ type: "text", text: `${TASKS_PATH} is already tidy (${outcome.items} items).` }],
+					details: outcome,
+				};
+			}
+			writeTidied(ctx.cwd, outcome.tidied!);
+			return {
+				content: [
+					{ type: "text", text: `Tidied ${TASKS_PATH}: ${outcome.items} item(s) reformatted (checkbox syntax, indentation, "Confirm (user):" prefixes) and reordered with unchecked items first.` },
+				],
+				details: outcome,
+			};
+		},
+	});
+
+	// /tasks-tidy — user command: same rewrite, behind a confirmation dialog.
+	pi.registerCommand("tasks-tidy", {
 		description: `Tidy ${TASKS_PATH}: normalize format and move unchecked items to the top`,
 		handler: async (_args, ctx) => {
-			const file = join(ctx.cwd, TASKS_PATH);
-			if (!existsSync(file)) {
+			const outcome = computeTidy(ctx.cwd);
+			if (outcome.status === "missing") {
 				ctx.ui.notify(`${TASKS_PATH} does not exist.`, "warning");
 				return;
 			}
@@ -349,41 +426,34 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify("Agent is running. Try again after it settles.", "warning");
 				return;
 			}
-
-			const original = readFileSync(file, "utf8");
-			const sections = parseDoc(original);
-			const items = countItems(sections);
-			if (items === 0) {
+			if (outcome.status === "no-items") {
 				ctx.ui.notify(
 					`No checklist items found in ${TASKS_PATH} — nothing to tidy.`,
 					"info",
 				);
 				return;
 			}
-
-			const tidied = tidyDoc(sections);
-			if (tidied === original) {
+			if (outcome.status === "unchanged") {
 				ctx.ui.notify(`${TASKS_PATH} is already tidy.`, "info");
 				return;
 			}
 
 			const ok = await ctx.ui.confirm(
-				"Tidy instructions?",
-				`${items} checklist item(s) will be reformatted (checkbox syntax, indentation, "Confirm (user):" prefixes) and reordered with unchecked items first. Unrecognized lines pass through untouched. See git diff if tracked.`,
+				"Tidy tasks?",
+				`${outcome.items} checklist item(s) will be reformatted (checkbox syntax, indentation, "Confirm (user):" prefixes) and reordered with unchecked items first. Unrecognized lines pass through untouched. See git diff if tracked.`,
 			);
 			if (!ok) {
 				ctx.ui.notify("Cancelled.", "info");
 				return;
 			}
 
-			writeFileSync(file, tidied, "utf8");
-			lastKnown = snapshotFile(ctx.cwd);
+			writeTidied(ctx.cwd, outcome.tidied!);
 			ctx.ui.notify(`${TASKS_PATH} tidied.`, "info");
 		},
 	});
 
-	// /instr-archive — move completed items to the archive file.
-	pi.registerCommand("instr-archive", {
+	// /tasks-archive — move completed items to the archive file.
+	pi.registerCommand("tasks-archive", {
 		description: `Move completed items from ${TASKS_PATH} to ${ARCHIVE_PATH}`,
 		handler: async (_args, ctx) => {
 			const file = join(ctx.cwd, TASKS_PATH);
@@ -397,8 +467,9 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const original = readFileSync(file, "utf8");
-			const { remaining, movedText, movedCount } =
-				extractCompleted(parseDoc(original));
+			const { remaining, movedText, movedCount } = extractCompleted(
+				parseDoc(original),
+			);
 			if (movedCount === 0) {
 				ctx.ui.notify(
 					`No completed items in ${TASKS_PATH} — nothing to archive.`,
@@ -442,10 +513,10 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// /instr-verify — inject a user message that starts the verification
+	// /tasks-verify — inject a user message that starts the verification
 	// walkthrough. The model asks the user per-item questions via
 	// ask_user_question and reflects the answers in the checklist file.
-	pi.registerCommand("instr-verify", {
+	pi.registerCommand("tasks-verify", {
 		description: `Verify pending items in ${TASKS_PATH} with the user (asks per-item questions, then updates the file)`,
 		handler: async (_args, ctx) => {
 			const file = join(ctx.cwd, TASKS_PATH);
@@ -470,19 +541,20 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// /instr — clean the file, or show usage for all subcommands.
-	pi.registerCommand("instr", {
-		description: `Manage ${TASKS_PATH} (subcommands: tidy, archive, clean)`,
-		handler: async (args, ctx) => {
-			const sub = args.trim().toLowerCase();
-			if (sub !== "clean") {
-				ctx.ui.notify(
-					`Usage: /instr tidy — normalize format, unchecked items first · /instr archive — move completed items to ${ARCHIVE_PATH} · /instr clean — clear ${TASKS_PATH} and write a tombstone note.`,
-					"info",
-				);
-				return;
-			}
+	// /tasks — show usage for all subcommands.
+	pi.registerCommand("tasks", {
+		description: `Manage ${TASKS_PATH} (see also: /tasks-tidy, /tasks-archive, /tasks-verify, /tasks-clear)`,
+		handler: async (_args, ctx) => {
+			ctx.ui.notify(
+				`Usage: /tasks-tidy — normalize format, unchecked items first · /tasks-archive — move completed items to ${ARCHIVE_PATH} · /tasks-verify — walk pending confirmations with the user · /tasks-clear — clear ${TASKS_PATH} and write a tombstone note.`,
+				"info",
+			);
+		},
+	});
 
+	// /tasks-clear — clear the file and write a tombstone note.
+	pi.registerCommand("tasks-clear", {
+		handler: async (_args, ctx) => {
 			const file = join(ctx.cwd, TASKS_PATH);
 			if (!existsSync(file)) {
 				ctx.ui.notify(`${TASKS_PATH} does not exist.`, "warning");
@@ -501,7 +573,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const ok = await ctx.ui.confirm(
-				"Clear instructions?",
+				"Clear tasks?",
 				`${TASKS_PATH} will be cleared and a tombstone note written. This cannot be undone (see git history if tracked).`,
 			);
 			if (!ok) {
@@ -510,7 +582,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const tombstone =
-				`<!-- Cleared via /instr clean on ${timestamp()}. ` +
+				`<!-- Cleared via /tasks-clear on ${timestamp()}. ` +
 				`Previous contents were intentionally removed by the user. ` +
 				`Do not reconstruct them from memory.` +
 				(existsSync(join(ctx.cwd, ".git"))
