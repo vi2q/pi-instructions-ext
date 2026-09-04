@@ -554,9 +554,9 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// /tasks — show usage for all subcommands.
-	pi.registerCommand("tasks", {
-		description: `Manage ${TASKS_PATH} (see also: /tasks-tidy, /tasks-archive, /tasks-verify, /tasks-clear)`,
+	// /tasks-info — command cheat sheet.
+	pi.registerCommand("tasks-info", {
+		description: `Show /tasks-* commands for ${TASKS_PATH}`,
 		handler: async (_args, ctx) => {
 			ctx.ui.notify(
 				`Usage: /tasks-tidy — normalize format, unchecked items first · /tasks-archive — move completed items to ${ARCHIVE_PATH} · /tasks-verify — walk pending confirmations with the user · /tasks-clear — clear ${TASKS_PATH} and write a tombstone note.`,
