@@ -12,11 +12,10 @@
  * - turn_end: refresh the staleness snapshot so the agent's own writes don't
  *   trigger the warning
  * - /tasks-tidy command and tasks_tidy tool: deterministic formatting —
- *   normalize checkbox syntax and
- *   indentation, normalize "Confirm (user):" prefixes on sub-items, and move
- *   unchecked items to the top of each section (checked items keep their
- *   order at the bottom). Unrecognized lines pass through untouched; if no
- *   checklist items are found the file is left as is.
+ *   normalize checkbox syntax and indentation, normalize "Confirm (user):"
+ *   prefixes on sub-items. Item order is preserved (no reordering).
+ *   Unrecognized lines pass through untouched; if no checklist items are
+ *   found the file is left as is.
  * - /tasks-archive: move completed top-level items (with their sub-items) to
  *   docs/TASKS-archive.md under a dated heading
  * - /tasks-clear: clear the file after confirmation and leave a tombstone
@@ -69,7 +68,7 @@ function buildInitMessage(ownerShort: string): string {
 		`If ask_user_question is unavailable, ask in plain text instead. Never mark a user-confirmation item complete without an explicit user answer. ` +
 		`Parallel-session rules: tag each top-level instruction you record with your session owner tag "(s${ownerShort})" and update only items carrying your own tag unless the user explicitly instructs otherwise; ` +
 		`re-read ${TASKS_PATH} before updating it, since parallel sessions may have changed it — merge, don't overwrite. ` +
-		`The tasks_tidy tool is available: after updating ${TASKS_PATH}, call it to normalize formatting (checkbox syntax, 2-space nesting, "Confirm (user):" prefixes) and keep unchecked items on top. ` +
+		`The tasks_tidy tool is available: after updating ${TASKS_PATH}, call it to normalize formatting (checkbox syntax, 2-space nesting, "Confirm (user):" prefixes). ` +
 		`Pure acknowledgements ("yes", "continue", etc.) need not be recorded. ` +
 		`When the repository is git-tracked, suggest committing ${TASKS_PATH} whenever instructions are added or completed. ` +
 		`Respond and record in the user's language.`
@@ -197,16 +196,9 @@ function serializeDoc(sections: Section[]): string {
 	return out.join("\n");
 }
 
-/** Deterministic tidy: normalize structure, unchecked items first per section. */
+/** Deterministic tidy: normalize structure only, preserve item order. */
 function tidyDoc(sections: Section[]): string {
-	const sorted: Section[] = sections.map((s) => ({
-		...s,
-		roots: [
-			...s.roots.filter((r) => !r.checked),
-			...s.roots.filter((r) => r.checked),
-		],
-	}));
-	return serializeDoc(sorted);
+	return serializeDoc(sections);
 }
 
 function timestamp(): string {
@@ -377,10 +369,10 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "tasks_tidy",
 		label: "Tidy tasks file",
-		description: `Normalize ${TASKS_PATH}: fix checkbox syntax, indentation and "Confirm (user):" prefixes, and reorder items unchecked-first within each section. Non-destructive: unrecognized lines pass through untouched.`,
-		promptSnippet: `Tidy ${TASKS_PATH}: normalize checklist formatting and move unchecked items to the top`,
+		description: `Normalize ${TASKS_PATH}: fix checkbox syntax, indentation and "Confirm (user):" prefixes. Order-preserving: no reordering. Non-destructive: unrecognized lines pass through untouched.`,
+		promptSnippet: `Tidy ${TASKS_PATH}: normalize checklist formatting (no reordering)`,
 		promptGuidelines: [
-			`After updating ${TASKS_PATH}, call tasks_tidy to keep the format normalized (checkbox syntax, 2-space nesting, "Confirm (user):" prefixes, unchecked items first).`,
+			`After updating ${TASKS_PATH}, call tasks_tidy to keep the format normalized (checkbox syntax, 2-space nesting, "Confirm (user):" prefixes). Item order is preserved.`,
 		],
 		parameters: Type.Object({}),
 		execute: async (_toolCallId, _params, _signal, _onUpdate, ctx) => {
@@ -418,7 +410,7 @@ export default function (pi: ExtensionAPI) {
 				content: [
 					{
 						type: "text",
-						text: `Tidied ${TASKS_PATH}: ${outcome.items} item(s) reformatted (checkbox syntax, indentation, "Confirm (user):" prefixes) and reordered with unchecked items first.`,
+						text: `Tidied ${TASKS_PATH}: ${outcome.items} item(s) reformatted (checkbox syntax, indentation, "Confirm (user):" prefixes). Item order preserved.`,
 					},
 				],
 				details: outcome,
@@ -428,7 +420,7 @@ export default function (pi: ExtensionAPI) {
 
 	// /tasks-tidy — user command: same rewrite, behind a confirmation dialog.
 	pi.registerCommand("tasks-tidy", {
-		description: `Tidy ${TASKS_PATH}: normalize format and move unchecked items to the top`,
+		description: `Tidy ${TASKS_PATH}: normalize format (order-preserving, no reordering)`,
 		handler: async (_args, ctx) => {
 			const outcome = computeTidy(ctx.cwd);
 			if (outcome.status === "missing") {
@@ -453,7 +445,7 @@ export default function (pi: ExtensionAPI) {
 
 			const ok = await ctx.ui.confirm(
 				"Tidy tasks?",
-				`${outcome.items} checklist item(s) will be reformatted (checkbox syntax, indentation, "Confirm (user):" prefixes) and reordered with unchecked items first. Unrecognized lines pass through untouched. See git diff if tracked.`,
+				`${outcome.items} checklist item(s) will be reformatted (checkbox syntax, indentation, "Confirm (user):" prefixes). Item order is preserved — no reordering. Unrecognized lines pass through untouched. See git diff if tracked.`,
 			);
 			if (!ok) {
 				ctx.ui.notify("Cancelled.", "info");
@@ -559,7 +551,7 @@ export default function (pi: ExtensionAPI) {
 		description: `Show /tasks-* commands for ${TASKS_PATH}`,
 		handler: async (_args, ctx) => {
 			ctx.ui.notify(
-				`Usage: /tasks-tidy — normalize format, unchecked items first · /tasks-archive — move completed items to ${ARCHIVE_PATH} · /tasks-verify — walk pending confirmations with the user · /tasks-clear — clear ${TASKS_PATH} and write a tombstone note.`,
+				`Usage: /tasks-tidy — normalize format (order-preserving) · /tasks-archive — move completed items to ${ARCHIVE_PATH} · /tasks-verify — walk pending confirmations with the user · /tasks-clear — clear ${TASKS_PATH} and write a tombstone note.`,
 				"info",
 			);
 		},
