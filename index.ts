@@ -393,20 +393,33 @@ export default function (pi: ExtensionAPI) {
 			}
 			if (outcome.status === "no-items") {
 				return {
-					content: [{ type: "text", text: `No checklist items in ${TASKS_PATH} — nothing to tidy.` }],
+					content: [
+						{
+							type: "text",
+							text: `No checklist items in ${TASKS_PATH} — nothing to tidy.`,
+						},
+					],
 					details: outcome,
 				};
 			}
 			if (outcome.status === "unchanged") {
 				return {
-					content: [{ type: "text", text: `${TASKS_PATH} is already tidy (${outcome.items} items).` }],
+					content: [
+						{
+							type: "text",
+							text: `${TASKS_PATH} is already tidy (${outcome.items} items).`,
+						},
+					],
 					details: outcome,
 				};
 			}
 			writeTidied(ctx.cwd, outcome.tidied!);
 			return {
 				content: [
-					{ type: "text", text: `Tidied ${TASKS_PATH}: ${outcome.items} item(s) reformatted (checkbox syntax, indentation, "Confirm (user):" prefixes) and reordered with unchecked items first.` },
+					{
+						type: "text",
+						text: `Tidied ${TASKS_PATH}: ${outcome.items} item(s) reformatted (checkbox syntax, indentation, "Confirm (user):" prefixes) and reordered with unchecked items first.`,
+					},
 				],
 				details: outcome,
 			};
