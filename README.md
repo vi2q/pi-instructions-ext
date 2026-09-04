@@ -70,9 +70,9 @@ The tag is hidden in the TUI by default. It is stored in the session file either
 
 **`/tasks-tidy`** is the user-facing version of the same rewrite, behind a confirmation dialog that shows the item count before anything changes. Lines the parser doesn't recognize pass through untouched; if no checklist items are found, nothing is written.
 
-**`/tasks-archive`** moves completed top-level items (with their sub-items) from the active file to `docs/TASKS-archive.md` under a dated `## Archived …` heading, keeping the archive in a single searchable file. A section heading is dropped only when its section becomes completely empty. A confirmation dialog shows the item count first.
+**`/tasks-archive`** moves completed top-level items (with their sub-items) from the active file to a dated file under `docs/archives/` (`TASKS-YYYY-MM-DD.md`; same-day runs append a new `## Archived …` heading to the same file). A section heading is dropped only when its section becomes completely empty. A confirmation dialog shows the item count first.
 
-**`/tasks-clear`** clears the file after a confirmation dialog and writes a tombstone comment stating when and how it was cleared, so a later session doesn't mistake the empty file for lost work. If the repo is git-tracked, the tombstone points at history.
+**`/tasks-clear`** clears the file after a confirmation dialog and regenerates the skeleton, keeping one short tombstone line (date + cleared by the user) — it doubles as re-initialization. The full record stays recoverable from git history if tracked.
 
 **`/tasks-info`** prints the full list of `/tasks-*` commands with one-line descriptions. It is only a cheat sheet — it takes no action.
 

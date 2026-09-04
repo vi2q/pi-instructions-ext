@@ -21,8 +21,10 @@
  *   minimal skeleton) and docs/RULES.md (the recording rules) if missing.
  *   Existing files are never overwritten.
  * - /tasks-archive: move completed top-level items (with their sub-items) to
- *   docs/TASKS-archive.md under a dated heading
- * - /tasks-clear: clear the file after confirmation and leave a tombstone
+ *   a dated file under docs/archives/
+ * - /tasks-clear: clear the file after confirmation and regenerate the
+ *   skeleton with a short tombstone line (date + cleared by the user) —
+ *   doubles as re-initialization
  * - /tasks-blocked and /tasks-completed: two-column picker over the checklist
  *   (left: categories, ←/→; right: items, ↑/↓). Enter spawns the item's text
  *   into the editor so the user can pin-point it back to the agent; Esc closes.
@@ -36,7 +38,13 @@
 
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import {
@@ -52,7 +60,7 @@ import { Type } from "typebox";
 
 const TASKS_PATH = "docs/TASKS.md";
 const RULES_PATH = "docs/RULES.md";
-const ARCHIVE_PATH = "docs/TASKS-archive.md";
+const ARCHIVE_DIR = "docs/archives";
 
 const TAG = "Auto-message: Please update docs/TASKS.md as needed.";
 
@@ -834,9 +842,9 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// /tasks-archive — move completed items to the archive file.
+	// /tasks-archive — move completed items to a dated file under docs/archives/.
 	pi.registerCommand("tasks-archive", {
-		description: `Move completed items from ${TASKS_PATH} to ${ARCHIVE_PATH}`,
+		description: `Move completed items from ${TASKS_PATH} to ${ARCHIVE_DIR}/`,
 		handler: async (_args, ctx) => {
 			const file = join(ctx.cwd, TASKS_PATH);
 			if (!existsSync(file)) {
@@ -862,25 +870,31 @@ export default function (pi: ExtensionAPI) {
 
 			const ok = await ctx.ui.confirm(
 				"Archive completed items?",
-				`${movedCount} completed item(s) (with sub-items) will be moved to ${ARCHIVE_PATH} under a dated heading. See git diff if tracked.`,
+				`${movedCount} completed item(s) (with sub-items) will be moved to ${ARCHIVE_DIR}/ under a dated heading. See git diff if tracked.`,
 			);
 			if (!ok) {
 				ctx.ui.notify("Cancelled.", "info");
 				return;
 			}
 
-			const stamp = timestamp();
-			const block = `## Archived ${stamp}\n\n${movedText.trimEnd()}\n`;
-			if (existsSync(join(ctx.cwd, ARCHIVE_PATH))) {
-				const prev = readFileSync(join(ctx.cwd, ARCHIVE_PATH), "utf8");
+			const now = new Date();
+			const pad = (n: number) => String(n).padStart(2, "0");
+			const day = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+			const archiveFile = join(ctx.cwd, ARCHIVE_DIR, `TASKS-${day}.md`);
+			const block = `## Archived ${day} ${pad(now.getHours())}:${pad(now.getMinutes())}\n\n${movedText.trimEnd()}\n`;
+			if (!existsSync(join(ctx.cwd, ARCHIVE_DIR))) {
+				mkdirSync(join(ctx.cwd, ARCHIVE_DIR), { recursive: true });
+			}
+			if (existsSync(archiveFile)) {
+				const prev = readFileSync(archiveFile, "utf8");
 				writeFileSync(
-					join(ctx.cwd, ARCHIVE_PATH),
+					archiveFile,
 					(prev.endsWith("\n") ? prev : prev + "\n") + "\n" + block,
 					"utf8",
 				);
 			} else {
 				writeFileSync(
-					join(ctx.cwd, ARCHIVE_PATH),
+					archiveFile,
 					`# TASKS archive\n\n${block}`,
 					"utf8",
 				);
@@ -889,7 +903,7 @@ export default function (pi: ExtensionAPI) {
 			writeFileSync(file, serializeDoc(remaining), "utf8");
 			lastKnown = snapshotFile(ctx.cwd);
 			ctx.ui.notify(
-				`${movedCount} item(s) archived to ${ARCHIVE_PATH}. When git-tracked, suggest committing both files.`,
+				`${movedCount} item(s) archived to ${join(ARCHIVE_DIR, `TASKS-${day}.md`)}. When git-tracked, suggest committing both files.`,
 				"info",
 			);
 		},
@@ -1019,14 +1033,17 @@ export default function (pi: ExtensionAPI) {
 		description: `Show /tasks-* commands for ${TASKS_PATH}`,
 		handler: async (_args, ctx) => {
 			ctx.ui.notify(
-				`Usage: /tasks-init — generate ${TASKS_PATH}/${RULES_PATH} if missing · /tasks-blocked — pick an unfinished item into the editor · /tasks-completed — pick a completed item into the editor · /tasks-tidy — normalize format (order-preserving) · /tasks-archive — move completed items to ${ARCHIVE_PATH} · /tasks-verify — walk pending confirmations with the user · /tasks-clear — clear ${TASKS_PATH} and write a tombstone note.`,
+				`Usage: /tasks-init — generate ${TASKS_PATH}/${RULES_PATH} if missing · /tasks-blocked — pick an unfinished item into the editor · /tasks-completed — pick a completed item into the editor · /tasks-tidy — normalize format (order-preserving) · /tasks-archive — move completed items to ${ARCHIVE_DIR}/ · /tasks-verify — walk pending confirmations with the user · /tasks-clear — clear ${TASKS_PATH} and regenerate the skeleton with a tombstone note.`,
 				"info",
 			);
 		},
 	});
 
-	// /tasks-clear — clear the file and write a tombstone note.
+	// /tasks-clear — clear the file and regenerate the skeleton with a short
+	// tombstone line. Doubles as re-initialization: what remains is the
+	// template plus one line recording when the user cleared it.
 	pi.registerCommand("tasks-clear", {
+		description: `Clear ${TASKS_PATH} and regenerate the skeleton (tombstone line kept)`,
 		handler: async (_args, ctx) => {
 			const file = join(ctx.cwd, TASKS_PATH);
 			if (!existsSync(file)) {
@@ -1047,7 +1064,7 @@ export default function (pi: ExtensionAPI) {
 
 			const ok = await ctx.ui.confirm(
 				"Clear tasks?",
-				`${TASKS_PATH} will be cleared and a tombstone note written. This cannot be undone (see git history if tracked).`,
+				`${TASKS_PATH} will be cleared and regenerated as the empty skeleton, keeping one short tombstone line (date + cleared by the user). This cannot be undone (see git history if tracked).`,
 			);
 			if (!ok) {
 				ctx.ui.notify("Cancelled.", "info");
@@ -1055,17 +1072,15 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const tombstone =
-				`<!-- Cleared via /tasks-clear on ${timestamp()}. ` +
-				`Previous contents were intentionally removed by the user. ` +
-				`Do not reconstruct them from memory.` +
+				`<!-- Cleared by the user via /tasks-clear on ${timestamp()}.` +
 				(existsSync(join(ctx.cwd, ".git"))
-					? " See git history if this file is tracked."
+					? " See git history if tracked."
 					: "") +
 				` -->\n`;
 
-			writeFileSync(file, tombstone, "utf8");
+			writeFileSync(file, TASKS_TEMPLATE + "\n" + tombstone, "utf8");
 			lastKnown = snapshotFile(ctx.cwd);
-			ctx.ui.notify(`${TASKS_PATH} cleared.`, "info");
+			ctx.ui.notify(`${TASKS_PATH} cleared and re-initialized.`, "info");
 		},
 	});
 }
