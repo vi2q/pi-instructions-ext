@@ -1,6 +1,6 @@
 {
   "name": "pi-instructions-ext",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "pi extension: keeps docs/TASKS.md as the standing record of work instructions and checklists",
   "license": "MIT",
   "type": "module",

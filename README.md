@@ -60,7 +60,7 @@ The tag is hidden in the TUI by default. It is stored in the session file either
 
 **`/tasks-verify`** starts a verification walkthrough: a user message is injected asking the model to go through every item that needs user confirmation — one `ask_user_question` per item — and update the checklist from the answers. Use it when the model finished work without asking, or to re-verify deferred items. Nothing is marked confirmed without an explicit user answer.
 
-**`/tasks-blocked`** opens a two-column picker over the unfinished work — categories on the left (`←`/`→`: Unfinished · Pending confirm · needs-fix), the selected category's items on the right (`↑`/`↓`). `Enter` spawns the item's text into the editor (ancestor chain and sub-items included, indented), so you can pin-point it back to the agent — append your own wording like 「これに取り掛かって」 and send. `Esc` closes.
+**`/tasks-blocked`** opens a two-column picker over the unfinished work — categories on the left (`←`/`→`: Unfinished · Pending confirm · needs-fix), the selected category's items on the right (`↑`/`↓`). `Enter` spawns the item's text into the editor, wrapped in double quotes as an exact item reference (ancestor chain and sub-items included, indented), so you can pin-point it back to the agent — append your own wording after the closing quote like 「これに取り掛かって」 and send. `Esc` closes.
 
 **`/tasks-completed`** is the same picker over checked items — handy for re-check requests (「これ、もう一度再確認して」).
 

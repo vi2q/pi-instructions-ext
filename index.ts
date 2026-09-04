@@ -493,7 +493,9 @@ class TaskPickerComponent implements Component {
 			dirty = true;
 		} else if (matchesKey(data, "return")) {
 			const item = cat?.items[this.itemIndex];
-			this.done(item ? item.spawn.join("\n") : null);
+			// Wrap in quotes so the agent sees an exact item reference; the user
+			// appends their own wording after the closing quote.
+			this.done(item ? `"${item.spawn.join("\n")}"` : null);
 			return;
 		}
 		if (!dirty) return;
