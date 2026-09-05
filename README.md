@@ -27,6 +27,12 @@ pi -e git:github.com/vi2q/pi-instructions-ext
 
 To scope it to one project, add the package to the project's `.pi/settings.json` instead of global settings (`pi install -l ...`).
 
+## Codex App
+
+The repository also includes a Codex App hook layer for the same TASKS/RULES workflow. It is configured in `.codex/hooks.json` and uses the companion script in `.codex/hooks/tasks_lifecycle.py`; the pi extension source is unchanged.
+
+See [`README-CODEX.md`](README-CODEX.md) for Codex setup, command equivalents, trust requirements, and the differences from pi's custom tools and TUI commands. The implementation mapping and hook schema notes are in [`docs/CODEX-HOOKS.md`](docs/CODEX-HOOKS.md).
+
 ## What it does
 
 **On session start** (once per session), only a short pointer is injected. If `docs/TASKS.md` or `docs/RULES.md` don't exist yet:
