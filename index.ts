@@ -39,7 +39,6 @@
  */
 
 import { createHash } from "node:crypto";
-import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
@@ -126,9 +125,12 @@ How this project records work instructions and their state (docs/TASKS.md).
   run /tasks-archive. The archive command is user-invoked — never move
   completed items yourself.
 - When work finishes and the project has no git repository yet, suggest
-  initializing one so the work and this record stay in history. At natural
-  checkpoints, suggest committing uncommitted changes. The agent proposes —
-  git is run only with the user's go-ahead.
+  initializing one so the work stays in history. At natural checkpoints,
+  suggest committing the work itself. The agent proposes — git is run only
+  with the user's go-ahead.
+- Never suggest a commit for docs/TASKS.md alone: it changes constantly as
+  a record, and a dedicated commit is excessive. As long as the repository
+  exists and the work is git-tracked, the record needs no extra attention.
 - The user may feed items back into the conversation via /tasks-blocked
   (unfinished / pending-confirmation / needs-fix items) or /tasks-completed
   (checked items, for re-check requests). When the user quotes one of these
@@ -392,30 +394,6 @@ function ownerShort(ctx: {
 	}
 }
 
-// --- Git nudge ----------------------------------------------------------------
-
-/**
- * If the instructions file exists but is not yet tracked by git, return a
- * nudge sentence appended to the session-start pointer. The record only becomes
- * durable once it's in history, so untracked files deserve a one-time hint.
- */
-function gitNudge(cwd: string): string {
-	if (!existsSync(join(cwd, ".git"))) return "";
-	try {
-		const status = execSync(`git status --porcelain -- "${TASKS_PATH}"`, {
-			cwd,
-			stdio: "pipe",
-		})
-			.toString()
-			.trim();
-		if (status === "") return "";
-		return ` ${TASKS_PATH} is not committed to git yet — suggest the user commit it so the record stays in history.`;
-	} catch {
-		// git unavailable or not a repo — skip the nudge
-		return "";
-	}
-}
-
 // --- Checklist pickers (/tasks-blocked, /tasks-completed) ---------------------
 
 interface PickerItem {
@@ -648,7 +626,7 @@ export default function (pi: ExtensionAPI) {
 
 		pi.sendMessage({
 			customType: INIT_CUSTOM_TYPE,
-			content: sessionPointer(ownerShort(ctx), filesReady) + gitNudge(ctx.cwd),
+			content: sessionPointer(ownerShort(ctx), filesReady),
 			display: true,
 		});
 
