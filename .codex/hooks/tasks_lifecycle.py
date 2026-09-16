@@ -18,7 +18,7 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 
 TASKS_PATH = Path("docs/TASKS.md")
 RULES_PATH = Path("docs/RULES.md")
@@ -68,11 +68,22 @@ How this project records work instructions and their state (docs/TASKS.md).
   ("yes", "continue") — judge what counts as an instruction.
 - Respond and record in the user's language.
 
+## Checklist shape
+
+- Keep checklist items flat: one `- [ ]` / `- [x]` per line, never
+  indented under another checklist item. --tidy flattens any nesting it
+  finds.
+- Write details (notes, rationale, sub-bullets) as plain non-checkbox lines
+  under the item, indented as you like. They travel with the item when it is
+  archived. A non-checkbox line that is not indented deeper than the item
+  belongs to the section and stays in the file.
+- "Confirm (user):" is its own flat item, not a sub-item.
+
 ## User confirmation
 
 - Items whose completion requires the user (behavior or visual checks,
-  acceptance) get a sub-item prefixed "Confirm (user):" — never check it
-  off yourself.
+  acceptance) get their own item prefixed "Confirm (user):" — never check
+  it off yourself.
 - When work finishes, ask the user about each pending confirmation item
   via the ask_user_question tool (one question per item, the concrete
   check described, options like OK / problem / later; plain text if the
@@ -221,7 +232,7 @@ def command_guidance(cwd: Path, prompt: str) -> str:
     if command == "/tasks-info":
         return (
             "\n\nTASKS commands: /tasks-init initialize; /tasks-tidy normalize formatting; "
-            "/tasks-archive move completed items; /tasks-clear reset with tombstone; "
+            "/tasks-archive move every [x] item; /tasks-clear reset with tombstone; "
             "/tasks-verify walk user confirmations; /tasks-blocked and /tasks-completed list item references."
         )
     return ""
@@ -277,15 +288,21 @@ class Item:
     level: int
     checked: bool
     text: str
-    children: list[Item] = field(default_factory=list)
-    trailing: list[str] = field(default_factory=list)
+    children: list[Block] = field(default_factory=list)
+
+
+@dataclass
+class Prose:
+    line: str
+
+
+Block = Union[Item, Prose]  # noqa: UP007 — runtime alias must work on Python 3.9
 
 
 @dataclass
 class Section:
     heading: str | None
-    pre: list[str] = field(default_factory=list)
-    roots: list[Item] = field(default_factory=list)
+    blocks: list[Block] = field(default_factory=list)
 
 
 CHECKBOX_RE = re.compile(r"^([ \t]*)[-*+][ \t]*\[([ xX])\][ \t]*(.*)$")
@@ -293,13 +310,28 @@ CONFIRM_RE = re.compile(r"^confirm\s*\(\s*user\s*\)?\s*[:：\-—]*\s*", re.I)
 
 
 def indent_width(raw: str) -> int:
-    return sum(2 if char == "\t" else 1 for char in raw)
+    n = 0
+    for char in raw:
+        if char == " ":
+            n += 1
+        elif char == "\t":
+            n += 2
+        else:
+            break
+    return n
 
 
 def parse_doc(text: str) -> list[Section]:
     sections = [Section(None)]
     current = sections[0]
     stack: list[Item] = []
+
+    def push(block: Block) -> None:
+        if stack:
+            stack[-1].children.append(block)
+        else:
+            current.blocks.append(block)
+
     for raw in text.split("\n"):
         if re.match(r"^#{1,6} ", raw):
             current = Section(raw)
@@ -312,37 +344,71 @@ def parse_doc(text: str) -> list[Section]:
             while stack and stack[-1].level >= level:
                 stack.pop()
             node = Item(level, match.group(2).lower() == "x", match.group(3).rstrip())
-            if stack:
-                stack[-1].children.append(node)
-            else:
-                current.roots.append(node)
+            push(node)
             stack.append(node)
             continue
-        if stack:
-            stack[-1].trailing.append(raw)
-        elif current.roots:
-            current.roots[-1].trailing.append(raw)
-        else:
-            current.pre.append(raw)
+        # Non-checkbox line. Blank lines never restructure the tree. A line
+        # attaches to the innermost open item only when it is indented deeper
+        # than that item; shallower prose belongs to the section (so it never
+        # rides along into an archive). The raw line is stored, so its own
+        # indentation is preserved on output.
+        if raw.strip():
+            note_level = indent_width(raw) // 2
+            while stack and stack[-1].level >= note_level:
+                stack.pop()
+        push(Prose(raw))
     return sections
 
 
 def count_items(sections: list[Section]) -> int:
     def walk(item: Item) -> int:
-        return 1 + sum(walk(child) for child in item.children)
+        return 1 + sum(
+            walk(child) for child in item.children if isinstance(child, Item)
+        )
 
-    return sum(walk(root) for section in sections for root in section.roots)
+    return sum(
+        walk(block)
+        for section in sections
+        for block in section.blocks
+        if isinstance(block, Item)
+    )
 
 
-def render_item(item: Item, depth: int, out: list[str]) -> None:
+def count_checked(sections: list[Section]) -> int:
+    def walk(item: Item) -> int:
+        return (1 if item.checked else 0) + sum(
+            walk(child) for child in item.children if isinstance(child, Item)
+        )
+
+    return sum(
+        walk(block)
+        for section in sections
+        for block in section.blocks
+        if isinstance(block, Item)
+    )
+
+
+def count_checked_in_subtree(item: Item) -> int:
+    return (1 if item.checked else 0) + sum(
+        count_checked_in_subtree(child)
+        for child in item.children
+        if isinstance(child, Item)
+    )
+
+
+# Checklist items are always emitted flat (depth 0): nesting is not a supported
+# shape (see docs/RULES.md) and --tidy flattens it. Prose lines are emitted
+# verbatim, so their own indentation is preserved.
+def render_item(item: Item, out: list[str]) -> None:
     text = item.text
-    if depth > 0 and CONFIRM_RE.match(text):
+    if CONFIRM_RE.match(text):
         text = CONFIRM_RE.sub("Confirm (user): ", text)
-    line = f"{'  ' * depth}- {'[x]' if item.checked else '[ ]'} {text}".rstrip()
-    out.append(line)
-    out.extend(item.trailing)
+    out.append(f"- {'[x]' if item.checked else '[ ]'} {text}".rstrip())
     for child in item.children:
-        render_item(child, depth + 1, out)
+        if isinstance(child, Prose):
+            out.append(child.line)
+        else:
+            render_item(child, out)
 
 
 def serialize(sections: list[Section]) -> str:
@@ -350,10 +416,16 @@ def serialize(sections: list[Section]) -> str:
     for section in sections:
         if section.heading is not None:
             out.append(section.heading)
-        out.extend(section.pre)
-        for root in section.roots:
-            render_item(root, 0, out)
+        for block in section.blocks:
+            if isinstance(block, Prose):
+                out.append(block.line)
+            else:
+                render_item(block, out)
     return "\n".join(out)
+
+
+def blocks_have_content(blocks: list[Block]) -> bool:
+    return any(isinstance(block, Item) or block.line.strip() for block in blocks)
 
 
 def ensure_files(cwd: Path) -> tuple[bool, bool]:
@@ -376,24 +448,43 @@ def archive_items(cwd: Path, confirm: bool) -> int:
         return 0
     sections = parse_doc(file.read_text(encoding="utf-8"))
     moved: list[Item] = []
+
+    def process(blocks: list[Block]) -> list[Block]:
+        keep: list[Block] = []
+        for block in blocks:
+            if isinstance(block, Prose):
+                keep.append(block)
+                continue
+            if block.checked:
+                moved.append(block)
+                continue
+            keep.append(
+                Item(block.level, block.checked, block.text, process(block.children))
+            )
+        return keep
+
     remaining: list[Section] = []
     for section in sections:
-        keep = [root for root in section.roots if not root.checked]
-        moved.extend(root for root in section.roots if root.checked)
-        if section.heading is None or keep or any(line.strip() for line in section.pre):
-            remaining.append(Section(section.heading, section.pre, keep))
+        keep = process(section.blocks)
+        if (
+            section.heading is None
+            or blocks_have_content(keep)
+            or re.match(r"^# ", section.heading)
+        ):
+            remaining.append(Section(section.heading, keep))
     if not moved:
         print("No completed items in docs/TASKS.md — nothing to archive.")
         return 0
     rendered: list[str] = []
     for item in moved:
-        render_item(item, 0, rendered)
+        render_item(item, rendered)
     day = datetime.now().strftime("%Y-%m-%d")
     stamp = datetime.now().strftime("%H:%M")
     archive = rel(cwd, ARCHIVE_DIR / f"TASKS-{day}.md")
     rendered_text = "\n".join(rendered).rstrip()
     block = f"## Archived {day} {stamp}\n\n{rendered_text}\n"
-    print(f"{len(moved)} completed top-level item(s) would be moved to {archive}.")
+    moved_count = sum(count_checked_in_subtree(item) for item in moved)
+    print(f"{moved_count} completed item(s) would be moved to {archive}.")
     if not confirm:
         print("Re-run with --confirm to write the archive and update docs/TASKS.md.")
         return 0
@@ -407,7 +498,7 @@ def archive_items(cwd: Path, confirm: bool) -> int:
     else:
         archive.write_text(f"# TASKS archive\n\n{block}", encoding="utf-8")
     file.write_text(serialize(remaining), encoding="utf-8")
-    print(f"Archived {len(moved)} item(s).")
+    print(f"Archived {moved_count} item(s).")
     return 0
 
 
@@ -432,11 +523,13 @@ def list_items(cwd: Path, completed: bool) -> int:
                 + '"'
             )
         for child in item.children:
-            walk(child, current)
+            if isinstance(child, Item):
+                walk(child, current)
 
     for section in sections:
-        for root in section.roots:
-            walk(root, [])
+        for block in section.blocks:
+            if isinstance(block, Item):
+                walk(block, [])
     return 0
 
 
@@ -478,7 +571,7 @@ def cli(cwd: Path, argv: list[str]) -> int:
             print("docs/TASKS.md is already tidy.")
         else:
             file.write_text(tidied, encoding="utf-8")
-            print("Tidied docs/TASKS.md. Item order preserved.")
+            print("Tidied docs/TASKS.md (flat checklist items). Item order preserved.")
         return 0
     if command == "--archive":
         return archive_items(cwd, "--confirm" in argv[1:])

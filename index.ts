@@ -15,15 +15,15 @@
  * - turn_end: refresh the staleness snapshot so the agent's own writes don't
  *   trigger the warning
  * - /tasks-tidy command and tasks_tidy tool: deterministic formatting —
- *   normalize checkbox syntax and indentation, normalize "Confirm (user):"
- *   prefixes on sub-items. Item order is preserved (no reordering).
- *   Unrecognized lines pass through untouched; if no checklist items are
- *   found the file is left as is.
+ *   normalize checkbox syntax, flatten nested checklist items to top level,
+ *   normalize "Confirm (user):" prefixes. Item order is preserved (no
+ *   reordering). Unrecognized lines pass through untouched; if no checklist
+ *   items are found the file is left as is.
  * - /tasks-init command and tasks_init tool: generate docs/TASKS.md (a
  *   minimal skeleton) and docs/RULES.md (the recording rules) if missing.
  *   Existing files are never overwritten.
- * - /tasks-archive: move completed top-level items (with their sub-items) to
- *   a dated file under docs/archives/
+ * - /tasks-archive: move every checked item (with its notes; output is flat)
+ *   to a dated file under docs/archives/
  * - /tasks-clear: clear the file after confirmation and regenerate the
  *   skeleton with a short tombstone line (date + cleared by the user) —
  *   doubles as re-initialization
@@ -72,7 +72,7 @@ const RULES_STALE =
 const TAG_DISPLAY = false;
 
 const VERIFY_MESSAGE =
-	`Auto-message: Walk through every item in ${TASKS_PATH} that needs user confirmation (sub-items marked "Confirm (user)", unfinished items whose completion condition is a user check such as behavior or visual verification, and any explicitly unfinished work). ` +
+	`Auto-message: Walk through every item in ${TASKS_PATH} that needs user confirmation (items marked "Confirm (user)", unfinished items whose completion condition is a user check such as behavior or visual verification, and any explicitly unfinished work). ` +
 	`For each item, use the ask_user_question tool to ask the user in their language — one question per item, with the required check described concretely (e.g. what to run and what to look for) and options such as OK / problem / later. ` +
 	`If the ask_user_question tool is unavailable, fall back to asking in plain text and waiting for the reply. ` +
 	`Reflect each answer in the file immediately: mark confirmed items "[x]" with a "— user-confirmed (date)" note, record problem reports as "— needs-fix: <summary>", and keep deferred items unchecked with "— pending confirmation". ` +
@@ -96,11 +96,22 @@ How this project records work instructions and their state (docs/TASKS.md).
   ("yes", "continue") — judge what counts as an instruction.
 - Respond and record in the user's language.
 
+## Checklist shape
+
+- Keep checklist items flat: one \`- [ ]\` / \`- [x]\` per line, never
+  indented under another checklist item. /tasks-tidy flattens any nesting
+  it finds.
+- Write details (notes, rationale, sub-bullets) as plain non-checkbox lines
+  under the item, indented as you like. They travel with the item when it is
+  archived. A non-checkbox line that is not indented deeper than the item
+  belongs to the section and stays in the file.
+- "Confirm (user):" is its own flat item, not a sub-item.
+
 ## User confirmation
 
 - Items whose completion requires the user (behavior or visual checks,
-  acceptance) get a sub-item prefixed "Confirm (user):" — never check it
-  off yourself.
+  acceptance) get their own item prefixed "Confirm (user):" — never check
+  it off yourself.
 - When work finishes, ask the user about each pending confirmation item
   via the ask_user_question tool (one question per item, the concrete
   check described, options like OK / problem / later; plain text if the
@@ -210,37 +221,52 @@ const CHECKBOX_RE = /^([ \t]*)[-*+][ \t]*\[([ xX])\][ \t]*(.*)$/;
 const CONFIRM_PREFIX_RE = /^confirm\s*\(\s*user\s*\)?\s*[:：\-—]*\s*/i;
 
 interface ItemNode {
+	kind: "item";
+	/** Original indentation level (used for parsing; rendering is flat). */
 	level: number;
 	checked: boolean;
 	text: string;
-	children: ItemNode[];
-	/** Raw non-checkbox lines that follow this item (continuations, blank separators). */
-	trailing: string[];
+	children: Block[];
 }
+
+/** A non-checkbox line (note, prose, blank separator) kept verbatim. */
+interface ProseBlock {
+	kind: "prose";
+	line: string;
+}
+
+type Block = ItemNode | ProseBlock;
 
 interface Section {
 	/** Raw heading line, or null for the preamble before the first heading. */
 	heading: string | null;
-	/** Prose lines before the first checkbox item. */
-	pre: string[];
-	roots: ItemNode[];
+	blocks: Block[];
 }
 
 function indentWidth(raw: string): number {
 	let n = 0;
-	for (const ch of raw) n += ch === "\t" ? 2 : 1;
+	for (const ch of raw) {
+		if (ch === " ") n += 1;
+		else if (ch === "\t") n += 2;
+		else break;
+	}
 	return n;
 }
 
 function parseDoc(text: string): Section[] {
 	const sections: Section[] = [];
-	let current: Section = { heading: null, pre: [], roots: [] };
+	let current: Section = { heading: null, blocks: [] };
 	sections.push(current);
 	let stack: ItemNode[] = [];
 
+	const push = (block: Block) => {
+		if (stack.length > 0) stack[stack.length - 1].children.push(block);
+		else current.blocks.push(block);
+	};
+
 	for (const rawLine of text.split("\n")) {
 		if (/^#{1,6} /.test(rawLine)) {
-			current = { heading: rawLine, pre: [], roots: [] };
+			current = { heading: rawLine, blocks: [] };
 			sections.push(current);
 			stack = [];
 			continue;
@@ -252,23 +278,28 @@ function parseDoc(text: string): Section[] {
 				stack.pop();
 			}
 			const node: ItemNode = {
+				kind: "item",
 				level,
 				checked: cb[2].toLowerCase() === "x",
 				text: cb[3].trimEnd(),
 				children: [],
-				trailing: [],
 			};
-			if (stack.length > 0) stack[stack.length - 1].children.push(node);
-			else current.roots.push(node);
+			push(node);
 			stack.push(node);
 			continue;
 		}
-		// Non-checkbox line: attach to the innermost open item so it travels
-		// with it; before any item in the section, it is leading prose.
-		if (stack.length > 0) stack[stack.length - 1].trailing.push(rawLine);
-		else if (current.roots.length > 0) {
-			current.roots[current.roots.length - 1].trailing.push(rawLine);
-		} else current.pre.push(rawLine);
+		// Non-checkbox line. Blank lines never restructure the tree. A line
+		// attaches to the innermost open item only when it is indented deeper
+		// than that item; shallower prose belongs to the section (so it never
+		// rides along into an archive). The raw line is stored, so its own
+		// indentation is preserved on output.
+		if (rawLine.trim() !== "") {
+			const noteLevel = Math.floor(indentWidth(rawLine) / 2);
+			while (stack.length > 0 && stack[stack.length - 1].level >= noteLevel) {
+				stack.pop();
+			}
+		}
+		push({ kind: "prose", line: rawLine });
 	}
 	return sections;
 }
@@ -277,30 +308,61 @@ function countItems(sections: Section[]): number {
 	let n = 0;
 	const walk = (node: ItemNode) => {
 		n++;
-		node.children.forEach(walk);
+		for (const child of node.children) if (child.kind === "item") walk(child);
 	};
-	for (const s of sections) s.roots.forEach(walk);
+	for (const s of sections)
+		for (const b of s.blocks) if (b.kind === "item") walk(b);
 	return n;
 }
 
-function renderNode(node: ItemNode, depth: number, out: string[]): void {
-	const pad = "  ".repeat(depth);
+/** Number of checked items, at any nesting level. */
+function countChecked(sections: Section[]): number {
+	let n = 0;
+	const walk = (node: ItemNode) => {
+		if (node.checked) n++;
+		for (const child of node.children) if (child.kind === "item") walk(child);
+	};
+	for (const s of sections)
+		for (const b of s.blocks) if (b.kind === "item") walk(b);
+	return n;
+}
+
+function countCheckedInSubtree(node: ItemNode): number {
+	let n = node.checked ? 1 : 0;
+	for (const child of node.children) {
+		if (child.kind === "item") n += countCheckedInSubtree(child);
+	}
+	return n;
+}
+
+/**
+ * Render one item and its subtree. Checklist items are always emitted flat
+ * (depth 0) — nesting is not a supported shape (see docs/RULES.md) and
+ * /tasks-tidy flattens it. Prose lines are emitted verbatim, so their own
+ * indentation (and therefore the visual grouping of notes under an item) is
+ * preserved.
+ */
+function renderNode(node: ItemNode, out: string[]): void {
 	let text = node.text;
-	// Normalize "Confirm (user):" prefixes on sub-items (common variants).
-	if (depth > 0 && CONFIRM_PREFIX_RE.test(text)) {
+	// Normalize "Confirm (user):" prefixes (common variants).
+	if (CONFIRM_PREFIX_RE.test(text)) {
 		text = text.replace(CONFIRM_PREFIX_RE, "Confirm (user): ");
 	}
-	out.push(`${pad}- ${node.checked ? "[x]" : "[ ]"} ${text}`.trimEnd());
-	for (const line of node.trailing) out.push(line);
-	for (const child of node.children) renderNode(child, depth + 1, out);
+	out.push(`- ${node.checked ? "[x]" : "[ ]"} ${text}`.trimEnd());
+	for (const child of node.children) {
+		if (child.kind === "prose") out.push(child.line);
+		else renderNode(child, out);
+	}
 }
 
 function serializeDoc(sections: Section[]): string {
 	const out: string[] = [];
 	for (const s of sections) {
 		if (s.heading !== null) out.push(s.heading);
-		for (const line of s.pre) out.push(line);
-		for (const root of s.roots) renderNode(root, 0, out);
+		for (const block of s.blocks) {
+			if (block.kind === "prose") out.push(block.line);
+			else renderNode(block, out);
+		}
 	}
 	return out.join("\n");
 }
@@ -316,36 +378,59 @@ function timestamp(): string {
 	return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 }
 
+/** Whether a section still holds anything worth keeping. */
+function blocksHaveContent(blocks: Block[]): boolean {
+	return blocks.some((b) => b.kind === "item" || b.line.trim() !== "");
+}
+
 /**
- * Move completed top-level items (with their sub-items) out of the sections.
- * Returns the remaining sections and the rendered text of moved items.
+ * Move every checked item (at any nesting level) out of the sections. A moved
+ * item keeps its whole subtree (including unchecked sub-items and notes). An
+ * unchecked item stays put; checked descendants are extracted from it.
+ * Returns the remaining sections and the rendered (flat) text of moved items.
  * A heading is dropped only when its section becomes completely empty.
  */
-function extractCompleted(sections: Section[]): {
+function archiveDoc(sections: Section[]): {
 	remaining: Section[];
 	movedText: string;
 	movedCount: number;
 } {
-	const remaining: Section[] = [];
 	const moved: ItemNode[] = [];
+
+	const process = (blocks: Block[]): Block[] => {
+		const keep: Block[] = [];
+		for (const block of blocks) {
+			if (block.kind === "prose") {
+				keep.push(block);
+				continue;
+			}
+			if (block.checked) {
+				moved.push(block);
+				continue;
+			}
+			keep.push({ ...block, children: process(block.children) });
+		}
+		return keep;
+	};
+
+	const remaining: Section[] = [];
 	for (const s of sections) {
-		const keep = s.roots.filter((r) => !r.checked);
-		moved.push(...s.roots.filter((r) => r.checked));
-		if (
-			s.heading === null ||
-			keep.length > 0 ||
-			s.pre.some((l) => l.trim() !== "")
-		) {
-			remaining.push({ heading: s.heading, pre: s.pre, roots: keep });
+		const keep = process(s.blocks);
+		if (s.heading === null) {
+			remaining.push({ heading: null, blocks: keep });
+		} else if (blocksHaveContent(keep) || /^# /.test(s.heading)) {
+			// Keep a document title even when its section is otherwise empty.
+			remaining.push({ heading: s.heading, blocks: keep });
 		}
 	}
+
 	const out: string[] = [];
-	for (const node of moved) renderNode(node, 0, out);
-	return {
-		remaining,
-		movedText: out.join("\n"),
-		movedCount: moved.length,
-	};
+	let movedCount = 0;
+	for (const node of moved) {
+		renderNode(node, out);
+		movedCount += countCheckedInSubtree(node);
+	}
+	return { remaining, movedText: out.join("\n"), movedCount };
 }
 
 // --- Tidy core (shared by /tasks-tidy command and the tasks_tidy tool) --------
@@ -419,7 +504,8 @@ function flattenSections(sections: Section[]): PickerItem[] {
 			{ depth, text: node.text },
 		];
 		for (const child of node.children) {
-			lines.push({ depth: depth + 1, text: child.text });
+			if (child.kind === "item")
+				lines.push({ depth: depth + 1, text: child.text });
 		}
 		out.push({
 			label: node.text,
@@ -429,11 +515,14 @@ function flattenSections(sections: Section[]): PickerItem[] {
 			depth,
 			spawn: lines.map((l) => `${"  ".repeat(l.depth)}- ${l.text}`),
 		});
-		node.children.forEach((child) =>
-			walk(child, [...chain, { depth, text: node.text }], depth + 1),
-		);
+		for (const child of node.children) {
+			if (child.kind === "item") {
+				walk(child, [...chain, { depth, text: node.text }], depth + 1);
+			}
+		}
 	};
-	for (const s of sections) s.roots.forEach((r) => walk(r, [], 0));
+	for (const s of sections)
+		for (const b of s.blocks) if (b.kind === "item") walk(b, [], 0);
 	return out;
 }
 
@@ -699,10 +788,10 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "tasks_tidy",
 		label: "Tidy tasks file",
-		description: `Normalize ${TASKS_PATH}: fix checkbox syntax, indentation and "Confirm (user):" prefixes. Order-preserving: no reordering. Non-destructive: unrecognized lines pass through untouched.`,
-		promptSnippet: `Tidy ${TASKS_PATH}: normalize checklist formatting (no reordering)`,
+		description: `Normalize ${TASKS_PATH}: fix checkbox syntax, flatten nested checklist items to top level, and normalize "Confirm (user):" prefixes. Order-preserving: no reordering. Non-destructive: unrecognized lines pass through untouched.`,
+		promptSnippet: `Tidy ${TASKS_PATH}: normalize checklist formatting (flat items, no reordering)`,
 		promptGuidelines: [
-			`After updating ${TASKS_PATH}, call tasks_tidy to keep the format normalized (checkbox syntax, 2-space nesting, "Confirm (user):" prefixes). Item order is preserved.`,
+			`After updating ${TASKS_PATH}, call tasks_tidy to keep the format normalized (checkbox syntax, flat items — no nested checkboxes, "Confirm (user):" prefixes). Item order is preserved.`,
 		],
 		parameters: Type.Object({}),
 		execute: async (_toolCallId, _params, _signal, _onUpdate, ctx) => {
@@ -740,7 +829,7 @@ export default function (pi: ExtensionAPI) {
 				content: [
 					{
 						type: "text",
-						text: `Tidied ${TASKS_PATH}: ${outcome.items} item(s) reformatted (checkbox syntax, indentation, "Confirm (user):" prefixes). Item order preserved.`,
+						text: `Tidied ${TASKS_PATH}: ${outcome.items} item(s) reformatted (checkbox syntax, flat items, "Confirm (user):" prefixes). Item order preserved.`,
 					},
 				],
 				details: outcome,
@@ -775,7 +864,7 @@ export default function (pi: ExtensionAPI) {
 
 			const ok = await ctx.ui.confirm(
 				"Tidy tasks?",
-				`${outcome.items} checklist item(s) will be reformatted (checkbox syntax, indentation, "Confirm (user):" prefixes). Item order is preserved — no reordering. Unrecognized lines pass through untouched. See git diff if tracked.`,
+				`${outcome.items} checklist item(s) will be reformatted (checkbox syntax, flat items, "Confirm (user):" prefixes). Item order is preserved — no reordering. Unrecognized lines pass through untouched. See git diff if tracked.`,
 			);
 			if (!ok) {
 				ctx.ui.notify("Cancelled.", "info");
@@ -862,10 +951,11 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const original = readFileSync(file, "utf8");
-			const { remaining, movedText, movedCount } = extractCompleted(
-				parseDoc(original),
-			);
-			if (movedCount === 0) {
+			const sections = parseDoc(original);
+			// Keep pre-dialog work minimal: parsing is cheap, but the archive
+			// text itself is built only after the user confirms.
+			const planned = countChecked(sections);
+			if (planned === 0) {
 				ctx.ui.notify(
 					`No completed items in ${TASKS_PATH} — nothing to archive.`,
 					"info",
@@ -875,12 +965,14 @@ export default function (pi: ExtensionAPI) {
 
 			const ok = await ctx.ui.confirm(
 				"Archive completed items?",
-				`${movedCount} completed item(s) (with sub-items) will be moved to ${ARCHIVE_DIR}/ under a dated heading. See git diff if tracked.`,
+				`${planned} completed item(s) (with their notes) will be moved to ${ARCHIVE_DIR}/ under a dated heading. See git diff if tracked.`,
 			);
 			if (!ok) {
 				ctx.ui.notify("Cancelled.", "info");
 				return;
 			}
+
+			const { remaining, movedText, movedCount } = archiveDoc(sections);
 
 			const now = new Date();
 			const pad = (n: number) => String(n).padStart(2, "0");

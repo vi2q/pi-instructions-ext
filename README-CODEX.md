@@ -39,10 +39,10 @@ Codex hooks cannot register pi-style custom tools or interactive TUI commands. T
 | Operation | Command |
 | --- | --- |
 | Initialize missing files | `python3 .codex/hooks/tasks_lifecycle.py --init` |
-| Normalize checklist syntax and indentation | `python3 .codex/hooks/tasks_lifecycle.py --tidy` |
+| Normalize checklist syntax and flatten nesting | `python3 .codex/hooks/tasks_lifecycle.py --tidy` |
 | List unfinished, pending-confirmation, and needs-fix items | `python3 .codex/hooks/tasks_lifecycle.py --list-blocked` |
 | List checked items for re-check requests | `python3 .codex/hooks/tasks_lifecycle.py --list-completed` |
-| Preview completed-item archive | `python3 .codex/hooks/tasks_lifecycle.py --archive` |
+| Preview the archive of all `[x]` items | `python3 .codex/hooks/tasks_lifecycle.py --archive` |
 | Write the archive after confirmation | `python3 .codex/hooks/tasks_lifecycle.py --archive --confirm` |
 | Clear and re-initialize after confirmation | `python3 .codex/hooks/tasks_lifecycle.py --clear --confirm` |
 
